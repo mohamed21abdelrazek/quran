@@ -174,19 +174,57 @@ export function ProgressView({ state }: { state: AppState }) {
         </CardContent>
       </Card>
 
-      {/* الدورة الحالية */}
-      {state.stats.remainingFirstPass > 0 && (
-        <Card className="border-primary/25 bg-primary/5">
-          <CardContent className="flex items-start gap-3 p-4">
-            <RefreshCcw className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-            <div className="text-sm leading-6">
-              <span className="font-bold">الجولة الأولى على حفظك: </span>
-              <span className="text-muted-foreground">
-                بقي {formatPages(state.stats.remainingFirstPass)} لم تراجعها بعد — وبوتيرتك الحالية ستكملها خلال{" "}
-                <span className="font-bold text-primary">{state.stats.cycleDays} يوماً تقريباً</span>، ثم يدخل وِردي كل
-                صفحة في دورة التثبيت الدائم.
-              </span>
+      {/* دورة الأمان — هل تنسى القديم؟ */}
+      {state.cycle.memorizedTotal > 0 && (
+        <Card
+          className={cn(
+            "border shadow-sm",
+            state.cycle.onTrack
+              ? "border-emerald-300/70 bg-emerald-50/60 dark:border-emerald-700/40 dark:bg-emerald-950/25"
+              : "border-amber-300/70 bg-amber-50/60 dark:border-amber-600/40 dark:bg-amber-950/25"
+          )}
+        >
+          <CardContent className="space-y-3.5 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <RefreshCcw className={cn("h-5 w-5", state.cycle.onTrack ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")} />
+                <p className="text-base font-extrabold">دورة الأمان — راجعت كل شيء خلال {state.cycle.targetDays} أيام؟</p>
+              </div>
+              <Badge className={state.cycle.onTrack ? "bg-emerald-600" : "bg-amber-500"} tabIndex={0}>
+                {Math.round(state.cycle.coveragePct * 100)}% تغطية
+              </Badge>
             </div>
+
+            <div>
+              <div className="h-3 overflow-hidden rounded-full bg-white/70 dark:bg-black/30" role="progressbar" aria-valuenow={Math.round(state.cycle.coveragePct * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="تغطية دورة الأمان">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all duration-700",
+                    state.cycle.onTrack
+                      ? "bg-gradient-to-l from-emerald-600 to-teal-500"
+                      : "bg-gradient-to-l from-amber-500 to-orange-400"
+                  )}
+                  style={{ width: `${Math.max(3, Math.round(state.cycle.coveragePct * 100))}%` }}
+                />
+              </div>
+              <div className="mt-2 flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>
+                  مراجَع خلال آخر {state.cycle.targetDays} أيام:{" "}
+                  <span className="font-bold text-foreground">{state.cycle.coveredPages}</span> / {state.cycle.memorizedTotal}
+                </span>
+                {state.stats.remainingFirstPass > 0 && (
+                  <span>
+                    لم يُراجع إطلاقاً بعد: <span className="font-bold text-foreground">{state.stats.remainingFirstPass}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <p className="text-xs leading-6 text-muted-foreground">
+              {state.cycle.onTrack
+                ? `دورتك الكاملة ${state.cycle.currentCycleDays} يوماً — كل صفحة تعود إليك قبل النسيان. استمر على هذا الطريق المبارك.`
+                : `بسعتك الحالية دورتك الكاملة ≈ ${state.cycle.currentCycleDays} يوماً — النظام يحمي الأضعف دائماً ويقدمه في وردك أولاً، وبرفع سعتك إلى ${state.cycle.requiredDaily} صفحة/يوم تضمن مراجعة كل حفظك خلال ${state.cycle.targetDays} أيام.`}
+            </p>
           </CardContent>
         </Card>
       )}

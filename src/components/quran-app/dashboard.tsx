@@ -8,7 +8,7 @@ import { ProgressRing } from "./progress-ring"
 import { fireConfetti } from "@/hooks/use-app"
 import type { AppState, TaskDTO } from "@/lib/types"
 import type { Quality } from "@/lib/content"
-import { dateAr, formatPages, weekdayShortAr } from "@/lib/format"
+import { dateAr, formatDays, formatPages, weekdayShortAr } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -35,6 +35,11 @@ import {
   CalendarDays,
   Hourglass,
   Star,
+  ShieldCheck,
+  Crosshair,
+  Wand2,
+  Loader2,
+  Eye,
 } from "lucide-react"
 
 interface ViewProps {
@@ -46,6 +51,7 @@ interface ViewProps {
 export function DashboardView({ state, load, action }: ViewProps) {
   const { toast } = useToast()
   const [busyTask, setBusyTask] = useState<number | null>(null)
+  const [applyingCapacity, setApplyingCapacity] = useState(false)
 
   const plan = state.plan
   const tasks = plan?.tasks ?? []
@@ -123,6 +129,22 @@ export function DashboardView({ state, load, action }: ViewProps) {
     }
   }
 
+  const applySuggestedCapacity = async () => {
+    setApplyingCapacity(true)
+    try {
+      await action("/api/settings", { dailyCapacity: state.cycle.requiredDaily })
+      toast({
+        title: "تم ضبط سعتك",
+        description: `أصبح وردك ${state.cycle.requiredDaily} صفحة يومياً — تكمل كل حفظك كل ${formatDays(state.cycle.targetDays)} بإذن الله`,
+      })
+      await load()
+    } catch (e) {
+      toast({ title: "خطأ", description: e instanceof Error ? e.message : "حاول مرة أخرى" })
+    } finally {
+      setApplyingCapacity(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
       {/* بطاقة الترحيب */}
@@ -166,6 +188,106 @@ export function DashboardView({ state, load, action }: ViewProps) {
         </div>
       </Card>
 
+      {/* بطاقة دورة الأمان — قاعدة عدم النسيان */}
+      {state.cycle.memorizedTotal > 0 && (
+        <Card
+          className={cn(
+            "animate-in fade-in-50 border shadow-sm",
+            state.cycle.onTrack
+              ? "border-emerald-300/70 bg-emerald-50/70 dark:border-emerald-700/50 dark:bg-emerald-950/30"
+              : "border-amber-300/70 bg-amber-50/70 dark:border-amber-600/40 dark:bg-amber-950/30"
+          )}
+        >
+          <CardContent className="space-y-3.5 p-4 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-xl",
+                    state.cycle.onTrack
+                      ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
+                      : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                  )}
+                >
+                  <ShieldCheck className="h-5 w-5" />
+                </span>
+                <div>
+                  <p className="text-sm font-extrabold">دورة الأمان — كل حفظك خلال {formatDays(state.cycle.targetDays)}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    قاعدة عدم النسيان: لا صفحة تنتظر أكثر من {state.cycle.targetDays} أيام
+                  </p>
+                </div>
+              </div>
+              <span
+                className={cn(
+                  "rounded-full px-3 py-1 text-xs font-extrabold tabular-nums",
+                  state.cycle.onTrack
+                    ? "bg-emerald-600 text-white"
+                    : "bg-amber-500 text-white"
+                )}
+              >
+                {Math.round(state.cycle.coveragePct * 100)}%
+              </span>
+            </div>
+
+            {/* شريط التغطية */}
+            <div>
+              <div
+                className="h-2.5 overflow-hidden rounded-full bg-white/60 dark:bg-black/25"
+                role="progressbar"
+                aria-valuenow={Math.round(state.cycle.coveragePct * 100)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="نسبة الحفظ المراجَع خلال دورة الأمان"
+              >
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all duration-700",
+                    state.cycle.onTrack
+                      ? "bg-gradient-to-l from-emerald-600 to-teal-500"
+                      : "bg-gradient-to-l from-amber-500 to-orange-400"
+                  )}
+                  style={{ width: `${Math.max(3, Math.round(state.cycle.coveragePct * 100))}%` }}
+                />
+              </div>
+              <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                راجعت <span className="font-bold text-foreground">{state.cycle.coveredPages}</span> من {" "}
+                <span className="font-bold text-foreground">{state.cycle.memorizedTotal}</span> صفحة محفوظة خلال آخر{" "}
+                {formatDays(state.cycle.targetDays)}
+              </p>
+            </div>
+
+            {/* الحالة والتوجيه */}
+            {state.cycle.onTrack ? (
+              <p className="flex items-start gap-2 text-xs leading-6 text-emerald-800 dark:text-emerald-200/90">
+                <Check className="mt-0.5 h-4 w-4 shrink-0" />
+                أنت على المسار الصحيح — دورتك الكاملة {formatDays(state.cycle.currentCycleDays)} ووردك دائماً في حدود قدرتك.
+              </p>
+            ) : (
+              <div className="space-y-2.5 rounded-xl border border-amber-300/60 bg-white/70 p-3 dark:border-amber-600/30 dark:bg-black/20">
+                <p className="text-xs leading-6 text-amber-900 dark:text-amber-100/90">
+                  بسعتك الحالية (<span className="font-bold">{state.profile.dailyCapacity}</span> صفحة/يوم) دورتك الكاملة ≈{" "}
+                  <span className="font-bold">{formatDays(state.cycle.currentCycleDays)}</span> — لضمان عدم النسيان راجع{" "}
+                  <span className="font-bold">{state.cycle.requiredDaily}</span> صفحة يومياً.
+                </p>
+                <p className="text-[11px] leading-5 text-muted-foreground">
+                  لا تقلق: وردك يبدأ دائماً بالأعلى خطراً على النسيان، فالضعيف لا يفلت أبداً مهما كانت سعتك.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={applySuggestedCapacity}
+                  disabled={applyingCapacity}
+                  className="h-9 gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+                >
+                  {applyingCapacity ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                  اضبط سعتي تلقائياً ({state.cycle.requiredDaily} صفحة/يوم)
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* احتفال اكتمال اليوم */}
       {allDone && (
         <Card className="animate-in fade-in-50 zoom-in-95 border-emerald-300/60 bg-emerald-50 dark:border-emerald-700/50 dark:bg-emerald-950/40">
@@ -195,7 +317,7 @@ export function DashboardView({ state, load, action }: ViewProps) {
                 لديك {formatPages(state.overdueCount)} متأخرة عن موعدها.
               </span>{" "}
               <span className="text-amber-800/80 dark:text-amber-300/80">
-                لا تقلق — النظام يوزعها تلقائياً على أيامك القادمة مع أولوية للأكثر تأخراً، وستراها تظهر في وردك تباعاً.
+                وردك يبدأ دائماً بالأعلى خطورة على النسيان — فالأكثر تأخراً والأضعف يظهر لك أولاً حتى لا يفلت شيء.
               </span>
             </div>
           </CardContent>
@@ -278,6 +400,90 @@ export function DashboardView({ state, load, action }: ViewProps) {
           </AlertDialog>
         )}
       </section>
+
+      {/* الصفحات المحتاجة مراجعة — تركيز على الأضعف */}
+      {state.cycle.memorizedTotal > 0 && (
+        <section aria-label="الصفحات المحتاجة مراجعة" className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-lg font-extrabold">
+              <Crosshair className="h-5 w-5 text-primary" />
+              تحتاج انتباهك
+            </h3>
+            {state.attention.length > 0 && (
+              <Badge variant="secondary" className="text-[11px]">
+                <Eye className="h-3 w-3" />
+                الأعلى خطورة على النسيان
+              </Badge>
+            )}
+          </div>
+
+          {state.attention.length === 0 ? (
+            <Card className="border-emerald-300/60 bg-emerald-50/70 dark:border-emerald-700/40 dark:bg-emerald-950/25">
+              <CardContent className="flex items-center gap-3 p-4">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600/15 text-emerald-700 dark:text-emerald-300">
+                  <ShieldCheck className="h-5 w-5" />
+                </span>
+                <p className="text-sm leading-6 text-emerald-900 dark:text-emerald-200/90">
+                  كل حفظك في أمان — لا توجد صفحات عالية الخطورة خارج ورد اليوم. استمر بارك الله فيك!
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-border/60 shadow-sm">
+              <CardContent className="p-3.5 sm:p-4">
+                <p className="mb-3 text-xs leading-5 text-muted-foreground">
+                  هذه الصفحات الأكثر عرضة للنسيان بعد ورد اليوم — كلما أنجزت وردك بانتظام تصفّت بسرعة، والمتأخر منها يظهر لك
+                  أولاً في الأيام القادمة.
+                </p>
+                <div className="scroll-thin max-h-72 space-y-2 overflow-y-auto pl-1" dir="rtl">
+                  {state.attention.map((a) => {
+                    const kindMeta = {
+                      never: { cls: "bg-gold/15 text-amber-700 dark:text-amber-300", icon: Sparkles },
+                      overdue: { cls: "bg-orange-500/15 text-orange-700 dark:text-orange-300", icon: Hourglass },
+                      weak: { cls: "bg-rose-500/10 text-rose-700 dark:text-rose-300", icon: AlertTriangle },
+                      misses: { cls: "bg-teal-600/10 text-teal-700 dark:text-teal-300", icon: Clock },
+                    }[a.kind]
+                    const KindIcon = kindMeta.icon
+                    return (
+                      <div
+                        key={a.page}
+                        className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-muted/30 px-3 py-2"
+                      >
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", kindMeta.cls)}>
+                            <KindIcon className="h-3.5 w-3.5" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold">
+                              {a.label}
+                              <span className="mr-1.5 text-[11px] font-medium text-muted-foreground">جزء {a.juz}</span>
+                            </p>
+                            <p className="truncate text-[11px] text-muted-foreground">{a.reason}</p>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {/* مؤشرات القوة الخمسة */}
+                          <span className="hidden items-center gap-0.5 sm:flex" title={`قوة الصفحة: ${a.strength}/5`}>
+                            {[0, 1, 2, 3, 4].map((i) => (
+                              <span
+                                key={i}
+                                className={cn(
+                                  "h-1.5 w-1.5 rounded-full",
+                                  i < a.strength ? "bg-emerald-500" : "bg-muted-foreground/25"
+                                )}
+                              />
+                            ))}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </section>
+      )}
 
       {/* التحفيز اليومي */}
       <Card className="overflow-hidden border-gold/30 bg-gradient-to-bl from-amber-50 to-white dark:from-amber-950/20 dark:to-card">

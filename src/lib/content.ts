@@ -96,26 +96,35 @@ export const QUALITY_META: Record<Quality, { label: string; hint: string; xpPerP
   hard: { label: "صعبة", hint: "احتجت نظراً وتكراراً", xpPerPage: 5 },
 }
 
+/**
+ * فترات التكرار المتباعد حسب قوة الصفحة (0..5).
+ * القاعدة الذهبية: لا تتجاوز أي فترة 10 أيام — حتى الصفحة المتقنة تعود خلال دورة الأمان.
+ */
 export const INTENSITY_META: Record<
   Intensity,
   { name: string; desc: string; intervals: number[] }
 > = {
   relaxed: {
     name: "هادئة",
-    desc: "فترات أطول بين المراجعات — مناسب إذا كانت ظروفك مزدحمة",
-    intervals: [2, 4, 8, 15, 30, 30],
+    desc: "الضعيف يعود كل يومين والمتقن كل 10 أيام — مناسب للظروف المزدحمة",
+    intervals: [2, 3, 5, 7, 10, 10],
   },
   balanced: {
     name: "متوازنة",
     desc: "توازن مثالي بين التثبيت والراحة — الخيار الموصى به",
-    intervals: [1, 2, 4, 8, 16, 30],
+    intervals: [1, 2, 4, 7, 9, 10],
   },
   intensive: {
     name: "حماسية",
-    desc: "مراجعات متقاربة لتثبيت أقوى في وقت أقل",
-    intervals: [1, 1, 2, 4, 8, 15],
+    desc: "مراجعات متقاربة لتثبيت أسرع — الضعيف يعود يومياً",
+    intervals: [1, 1, 3, 5, 8, 10],
   },
 }
+
+/** السعات القصوى المسموحة */
+export const MAX_CAPACITY = 60
+export const MAX_UNIT_SIZE = 5
+export const GAP_OPTIONS = [7, 10, 14]
 
 export const BASELINE_META: Record<string, { label: string; desc: string; strength: number }> = {
   weak: { label: "يحتاج تقوية", desc: "أحفظها لكن تحتاج مراجعة مكثفة", strength: 0 },

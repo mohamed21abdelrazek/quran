@@ -11,8 +11,8 @@ import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PageGrid } from "./page-grid"
 import type { AppState } from "@/lib/types"
-import { INTENSITY_META, type Intensity } from "@/lib/content"
-import { formatPages, pagesToRanges } from "@/lib/format"
+import { GAP_OPTIONS, INTENSITY_META, MAX_CAPACITY, type Intensity } from "@/lib/content"
+import { formatDays, formatPages, pagesToRanges } from "@/lib/format"
 import { juzPageRange } from "@/lib/quran"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
@@ -46,6 +46,8 @@ import {
   Pencil,
   Loader2,
   Clock3,
+  ShieldCheck,
+  Wand2,
 } from "lucide-react"
 
 const TIMEZONES = [
@@ -76,6 +78,7 @@ export function SettingsView({
   const [capacity, setCapacity] = useState(p.dailyCapacity)
   const [unitSize, setUnitSize] = useState(p.unitSize)
   const [intensity, setIntensity] = useState<Intensity>(p.intensity)
+  const [maxGap, setMaxGap] = useState(p.maxGapDays)
   const [autoAdjust, setAutoAdjust] = useState(p.autoAdjust)
   const [timezone, setTimezone] = useState(p.timezone)
   const [saving, setSaving] = useState(false)
@@ -106,10 +109,11 @@ export function SettingsView({
         dailyCapacity: capacity,
         unitSize,
         intensity,
+        maxGapDays: maxGap,
         autoAdjust,
         timezone,
       })
-      toast({ title: "تم الحفظ", description: "ستُطبق إعداداتك الجديدة على الخطط القادمة" })
+      toast({ title: "تم الحفظ", description: "ستُطبق إعداداتك الجديدة على خطط الأيام القادمة" })
       setDirty(false)
       await load()
     } catch (e) {
@@ -164,6 +168,9 @@ export function SettingsView({
   }
 
   const cycleEstimate = Math.ceil(state.memorized.total / capacity)
+  const requiredDaily = state.cycle.memorizedTotal > 0 ? Math.ceil(state.cycle.memorizedTotal / maxGap) : 0
+  const meetsTarget = capacity >= requiredDaily
+  const sliderMax = Math.max(12, requiredDaily, capacity, Math.min(MAX_CAPACITY, state.memorized.total || 12))
 
   return (
     <div className="space-y-5">
@@ -201,20 +208,70 @@ export function SettingsView({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label>عدد الصفحات يومياً</Label>
-              <Badge variant="secondary" className="text-sm font-extrabold tabular-nums">{capacity}</Badge>
+              <div className="flex items-center gap-2">
+                {requiredDaily > 0 && (
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "gap-1 text-[11px]",
+                      meetsTarget
+                        ? "border-emerald-400/60 text-emerald-700 dark:text-emerald-300"
+                        : "border-amber-400/70 text-amber-700 dark:text-amber-300"
+                    )}
+                  >
+                    <ShieldCheck className="h-3 w-3" />
+                    هدف دورة الأمان: {requiredDaily} صفحة/يوم
+                  </Badge>
+                )}
+                <Badge variant="secondary" className="text-sm font-extrabold tabular-nums">{capacity}</Badge>
+              </div>
             </div>
             <Slider
-              value={[capacity]}
+              value={[Math.min(capacity, sliderMax)]}
               min={1}
-              max={10}
+              max={sliderMax}
               step={1}
               onValueChange={(v) => set(() => setCapacity(v[0]))}
               aria-label="عدد الصفحات اليومي"
             />
-            <p className="text-xs leading-5 text-muted-foreground">
-              بهذه الوتيرة تكمل جولة كاملة على {formatPages(state.memorized.total)} خلال{" "}
-              <span className="font-bold text-foreground">{cycleEstimate} يوماً تقريباً</span> (يُطبق من خطة الغد).
-            </p>
+            {state.cycle.memorizedTotal > 0 && (
+              <div
+                className={cn(
+                  "rounded-xl border p-3.5 text-xs leading-6",
+                  meetsTarget
+                    ? "border-emerald-300/70 bg-emerald-50/70 text-emerald-900 dark:border-emerald-700/40 dark:bg-emerald-950/30 dark:text-emerald-200/90"
+                    : "border-amber-300/70 bg-amber-50/70 text-amber-900 dark:border-amber-600/40 dark:bg-amber-950/30 dark:text-amber-100/90"
+                )}
+              >
+                {meetsTarget ? (
+                  <p>
+                    <span className="font-bold">ممتاز — أنت محقق هدف عدم النسيان.</span> دورتك الكاملة على كل حفظك{" "}
+                    ({formatPages(state.cycle.memorizedTotal)}) ستكتمل خلال {formatDays(cycleEstimate)} وهي ضمن دورة الأمان
+                    ({formatDays(maxGap)}).
+                  </p>
+                ) : (
+                  <div className="space-y-2.5">
+                    <p>
+                      بسعة {capacity} صفحة/يوم دورتك الكاملة ≈ <span className="font-bold">{formatDays(cycleEstimate)}</span>{" "}
+                      — أطول من دورة الأمان ({formatDays(maxGap)}). النظام سيحمي الضعيف دائماً ويركز عليه أولاً، لكن لضمان
+                      مراجعة كل الحفظ ضمن {formatDays(maxGap)} اجعل سعتك{" "}
+                      <span className="font-bold">{requiredDaily} صفحة/يوم</span> فأكثر.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="h-8 gap-1.5"
+                      onClick={() => set(() => setCapacity(Math.min(MAX_CAPACITY, requiredDaily)))}
+                      disabled={requiredDaily > MAX_CAPACITY}
+                    >
+                      <Wand2 className="h-3.5 w-3.5" />
+                      طبّق السعة المقترحة ({requiredDaily})
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2.5">
@@ -248,6 +305,37 @@ export function SettingsView({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* قاعدة عدم النسيان */}
+          <div className="space-y-2.5 rounded-xl border border-primary/25 bg-primary/5 p-4">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              <Label className="text-sm font-extrabold">قاعدة عدم النسيان — دورة الأمان</Label>
+            </div>
+            <p className="text-xs leading-6 text-muted-foreground">
+              أقصى مدة تنتظرها أي صفحة بين مراجعتين — لا يُسمح لأي صفحة بتجاوزها مهما بلغ إتقانها، فلا يُنسى القديم أبداً.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {GAP_OPTIONS.map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => set(() => setMaxGap(g))}
+                  aria-pressed={maxGap === g}
+                  className={cn(
+                    "rounded-full border-2 px-4 py-1.5 text-sm font-bold transition-all",
+                    maxGap === g ? "border-primary bg-primary text-primary-foreground" : "border-border/60 hover:border-primary/40"
+                  )}
+                >
+                  {g} أيام
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] leading-5 text-muted-foreground">
+              التوصية: 10 أيام — توازن مثالي بين عدم النسيان وعدم الإرهاق. باختيارك {maxGap} يوماً يصبح هدفك اليومي{" "}
+              {requiredDaily > 0 ? `${requiredDaily} صفحة` : "حسب حجم حفظك"}.
+            </p>
+          </div>
+
           <div className="grid gap-2 sm:grid-cols-3">
             {(Object.keys(INTENSITY_META) as Intensity[]).map((k) => (
               <button
@@ -262,8 +350,8 @@ export function SettingsView({
               >
                 <p className="text-sm font-bold">{INTENSITY_META[k].name}</p>
                 <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{INTENSITY_META[k].desc}</p>
-                <p className="mt-2 text-[10px] font-bold text-primary/70" dir="ltr">
-                  {INTENSITY_META[k].intervals.join(" → ")} يوم
+                <p className="mt-2 text-[10px] font-bold text-primary/70" dir="rtl">
+                  فترات العودة: {INTENSITY_META[k].intervals.map((i) => Math.min(i, maxGap)).join("، ")} يوم
                 </p>
               </button>
             ))}

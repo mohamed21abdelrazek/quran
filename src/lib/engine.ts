@@ -1,9 +1,10 @@
-// محرك خطة المراجعة الذكية: تكرار متباعد + تكيّف يومي + إعادة توزيع تلقائية
+// محرك خطة المراجعة الذكية: تكرار متباعد + تركيز على الأضعف + قاعدة عدم النسيان (10 أيام)
 import { db } from "@/lib/db"
 import { BADGES, INTENSITY_META, levelFromXp, motivationFor } from "./content"
 import type { Intensity, Quality } from "./content"
 import { juzPageRange, pageToJuz, pagesLabel, surahsInRange, TOTAL_JUZ, TOTAL_PAGES } from "./quran"
-import type { AppState, PlanDTO, TaskDTO } from "./types"
+import { formatDays } from "./format"
+import type { AppState, AttentionPage, PlanDTO, TaskDTO } from "./types"
 
 // ==================== أدوات التواريخ ====================
 
@@ -37,6 +38,25 @@ export function diffDays(a: string, b: string): number {
   return Math.round((da.getTime() - db.getTime()) / 86400000)
 }
 
+/** تاريخ لحظة زمنية بصيغة YYYY-MM-DD حسب المنطقة الزمنية */
+export function dateOnlyInTz(d: Date, tz: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d)
+  } catch {
+    return d.toISOString().slice(0, 10)
+  }
+}
+
+/** قاعدة عدم النسيان — أقصى فجوة مضمونة بين مراجعات أي صفحة */
+export function effectiveMaxGap(raw: number | null | undefined): number {
+  return Math.max(3, Math.min(30, Math.round(raw || 10)))
+}
+
 // ==================== الملف الشخصي ====================
 
 export async function getProfile() {
@@ -58,6 +78,29 @@ function applyStrength(strength: number, quality: Quality): number {
   if (quality === "perfect") return Math.min(5, strength + 1)
   if (quality === "hard") return Math.max(0, strength - 1)
   return strength
+}
+
+/**
+ * درجة خطورة النسيان لصفحة — كلما زادت زادت أولويتها في ورد اليوم.
+ * المحور الأساسي للخطة: التركيز الدائم على الضعيف والمتأخر وما لم يُراجع أبداً.
+ */
+export function riskScore(
+  p: { reviews: number; strength: number; misses: number; dueDate: string | null },
+  today: string
+): number {
+  let risk = 0
+  if (p.reviews === 0) risk += 9 // لم تُراجع بعد — أولوية قصوى
+  if (p.dueDate) {
+    const d = diffDays(today, p.dueDate)
+    if (d > 0) risk += Math.min(d, 15) * 2 // متأخرة — كل يوم تأخير يرفع الخطر
+    else if (d === 0) risk += 0.5 // مستحقة اليوم
+    else risk -= Math.min(-d, 10) * 0.8 // مستقبلية — تنتظر دورها بهدوء
+  } else {
+    risk += 6 // محفوظة بلا موعد (احتياطي)
+  }
+  risk += (5 - p.strength) * 2.2 // الأضعف أخطر دائماً
+  risk += Math.min(p.misses, 5) * 1.5 // سبق أن فاتتها مراجعات
+  return risk
 }
 
 // ==================== معالجة الأيام الفائتة ====================
@@ -120,16 +163,32 @@ async function processPendingBefore(today: string) {
 // ==================== توليد خطة اليوم ====================
 
 /**
- * المخطط اليومي:
- * 1) يستهدف الصفحات المستحقة (المتأخرة أولاً ثم مستحقة اليوم ثم غير المراجعة أبداً)
- * 2) يوازن الاختيار بين الأجزاء حتى تكون المراجعة متنوعة
- * 3) يتكيف: السعة الفعلية تعتمد على أدائك في آخر 7 أيام + حجم المتأخرات
- * 4) يكمل السعة بصفحات قريبة الاستحقاق (مراجعة استباقية) حتى لا يفرغ وردك أبداً
+ * المخطط اليومي — مبدآن لا يُخرقان:
+ * 1) وردك لا يتجاوز قدرتك أبداً (السعة الفعلية ≤ سعتك المحددة)
+ * 2) يبدأ دائماً بالأعلى خطورة على النسيان: المتأخر ثم الضعيف ثم لم يُراجع أبداً
+ * ومع كل مراجعة تُحدَّث فترة العودة بحيث لا تتجاوز قاعدة عدم النسيان (10 أيام افتراضياً).
  */
-export async function ensureTodayPlan(profile: { id: number; timezone: string; dailyCapacity: number; unitSize: number; intensity: string; autoAdjust: boolean }) {
+export async function ensureTodayPlan(profile: {
+  id: number
+  timezone: string
+  dailyCapacity: number
+  unitSize: number
+  intensity: string
+  maxGapDays: number
+  autoAdjust: boolean
+}) {
   const today = todayStr(profile.timezone)
+  const maxGap = effectiveMaxGap(profile.maxGapDays)
 
   await processPendingBefore(today)
+
+  // قاعدة عدم النسيان: لا تنتظر أي صفحة محفوظة أكثر من maxGap يوماً
+  // (يشمل ترحيل أي مواعيد قديمة كانت مجدولة بفترات أطول)
+  const cutoff = addDays(today, maxGap)
+  await db.pageState.updateMany({
+    where: { memorized: true, dueDate: { gt: cutoff } },
+    data: { dueDate: cutoff },
+  })
 
   const existing = await db.dailyPlan.findUnique({
     where: { date: today },
@@ -139,8 +198,6 @@ export async function ensureTodayPlan(profile: { id: number; timezone: string; d
 
   const pages = await db.pageState.findMany({ where: { memorized: true } })
   if (pages.length === 0) return null
-
-  const intervals = intervalsFor(profile.intensity)
 
   // --- حساب السعة الفعلية (التكيف) ---
   let effCapacity = profile.dailyCapacity
@@ -158,70 +215,21 @@ export async function ensureTodayPlan(profile: { id: number; timezone: string; d
     } else if (rate < 0.8) {
       effCapacity = Math.max(1, Math.round(profile.dailyCapacity * 0.85))
     }
-    // لا نرفع السعة تلقائياً إلا مع سلسلة قوية (يُطبق في الجلسة لا يخزن)
+    // لا نرفع السعة فوق ما حددته أبداً — الورد يبقى دائماً في حدود قدرتك
   }
 
-  // --- ترتيب المرشحين ---
+  // --- اختيار بترتيب الخطورة: الأعلى خطراً على النسيان أولاً ---
   const due = pages.filter((p) => !p.dueDate || p.dueDate <= today)
-  const overdue = due.filter((p) => p.dueDate && p.dueDate < today).length
-  if (profile.autoAdjust && overdue > effCapacity) {
-    // دفعة لطيفة لتصفية المتأخرات على مدار أسبوع تقريباً
-    effCapacity = Math.min(effCapacity + Math.min(4, Math.ceil(overdue / 7)), profile.dailyCapacity + 4)
-  }
+  const dueSorted = [...due].sort(
+    (a, b) => riskScore(b, today) - riskScore(a, today) || a.page - b.page
+  )
+  const picked: typeof dueSorted = dueSorted.slice(0, effCapacity)
 
-  const dueSorted = [...due].sort((a, b) => {
-    // غير المراجعة أبداً لها الأولوية القصوى
-    if ((a.reviews === 0 ? 1 : 0) !== (b.reviews === 0 ? 1 : 0)) return a.reviews === 0 ? -1 : 1
-    // الأكثر تأخراً أولاً
-    const ad = a.dueDate ?? ""
-    const bd = b.dueDate ?? ""
-    if (ad !== bd) return ad < bd ? -1 : 1
-    // ثم الأضعف
-    return a.strength - b.strength
-  })
-
-  // --- توزيع دائري بين الأجزاء للتنوع ---
-  const byJuz = new Map<number, typeof dueSorted>()
-  for (const p of dueSorted) {
-    const j = pageToJuz(p.page)
-    const arr = byJuz.get(j) ?? []
-    arr.push(p)
-    byJuz.set(j, arr)
-  }
-  const juzOrder = [...byJuz.keys()].sort((a, b) => {
-    const la = byJuz.get(a)![0]
-    const lb = byJuz.get(b)![0]
-    const pa = la.reviews === 0 ? 0 : 1
-    const pb = lb.reviews === 0 ? 0 : 1
-    if (pa !== pb) return pa - pb
-    const da = la.dueDate ?? ""
-    const dbb = lb.dueDate ?? ""
-    return da < dbb ? -1 : da > dbb ? 1 : 0
-  })
-
-  const picked: typeof dueSorted = []
-  let idx = 0
-  while (picked.length < effCapacity && juzOrder.length > 0) {
-    const j = juzOrder[idx % juzOrder.length]
-    const queue = byJuz.get(j)!
-    const nextPage = queue.shift()
-    if (nextPage) picked.push(nextPage)
-    if (queue.length === 0) {
-      const pos = juzOrder.indexOf(j)
-      juzOrder.splice(pos, 1)
-      if (pos <= idx % (juzOrder.length + 1)) {
-        // نكمل من نفس الموضع تقريباً
-      }
-    }
-    if (juzOrder.length === 0) break
-    idx++
-  }
-
-  // --- مراجعة استباقية لتعبئة السعة ---
+  // --- تعبئة لطيفة بالأقرب استحقاقاً حتى لا يفرغ وردك أبداً ---
   if (picked.length < effCapacity) {
     const upcoming = pages
       .filter((p) => p.dueDate && p.dueDate > today)
-      .sort((a, b) => (a.dueDate! < b.dueDate! ? -1 : 1))
+      .sort((a, b) => (a.dueDate! < b.dueDate! ? -1 : a.dueDate! > b.dueDate! ? 1 : 0))
     for (const p of upcoming) {
       if (picked.length >= effCapacity) break
       if (!picked.includes(p)) picked.push(p)
@@ -279,6 +287,7 @@ export async function completeTask(taskId: number, quality: Quality) {
   const profile = await getProfile()
   const today = todayStr(profile.timezone)
   const intervals = intervalsFor(profile.intensity)
+  const maxGap = effectiveMaxGap(profile.maxGapDays)
 
   const pagesCount = task.pageTo - task.pageFrom + 1
   let xpGain = 0
@@ -289,7 +298,8 @@ export async function completeTask(taskId: number, quality: Quality) {
     const page = await db.pageState.findUnique({ where: { page: p } })
     if (!page) continue
     const newStrength = applyStrength(page.strength, quality)
-    const interval = intervals[newStrength]
+    // قاعدة عدم النسيان: مهما بلغ إتقانك لا تنتظر الصفحة أكثر من maxGap
+    const interval = Math.min(intervals[newStrength], maxGap)
     await db.pageState.update({
       where: { page: p },
       data: {
@@ -425,9 +435,11 @@ export async function applyOnboarding(input: {
   dailyCapacity: number
   unitSize: number
   intensity: Intensity
+  maxGapDays?: number
   autoAdjust: boolean
 }) {
   const today = todayStr("Africa/Cairo")
+  const maxGap = effectiveMaxGap(input.maxGapDays ?? 10)
 
   // تهيئة كل الصفحات
   const all: { page: number; memorized: boolean; strength: number; dueDate: string | null }[] = []
@@ -458,6 +470,7 @@ export async function applyOnboarding(input: {
       dailyCapacity: input.dailyCapacity,
       unitSize: input.unitSize,
       intensity: input.intensity,
+      maxGapDays: maxGap,
       autoAdjust: input.autoAdjust,
       xp: 0,
       streak: 0,
@@ -547,6 +560,7 @@ export async function buildAppState(): Promise<AppState> {
         xp: 0,
         streak: 0,
         bestStreak: 0,
+        maxGapDays: effectiveMaxGap(profile.maxGapDays),
       },
       level: { index: 0, name: "مبتدئ", nextThreshold: 150, progress: 0 },
       plan: null,
@@ -555,6 +569,16 @@ export async function buildAppState(): Promise<AppState> {
       activity: [],
       motivation: motivationFor(todayStr(profile.timezone)),
       memorized: { total: 0, strengths: [] },
+      cycle: {
+        targetDays: effectiveMaxGap(profile.maxGapDays),
+        memorizedTotal: 0,
+        currentCycleDays: 0,
+        requiredDaily: 0,
+        coveragePct: 1,
+        coveredPages: 0,
+        onTrack: true,
+      },
+      attention: [],
       stats: { totalDonePages: 0, completionRate: 0, remainingFirstPass: 0, cycleDays: 0, perfectDays: 0 },
       badges: BADGES.map((b) => ({ id: b.id, earned: false })),
     }
@@ -568,13 +592,11 @@ export async function buildAppState(): Promise<AppState> {
   // خريطة الصفحات
   const pageRows = await db.pageState.findMany()
   const strengths = new Array<number>(TOTAL_PAGES).fill(-1)
-  let memorizedTotal = 0
-  for (const p of pageRows) {
-    if (p.memorized) {
-      strengths[p.page - 1] = p.strength
-      memorizedTotal++
-    }
+  const memorizedRows = pageRows.filter((p) => p.memorized)
+  for (const p of memorizedRows) {
+    strengths[p.page - 1] = p.strength
   }
+  const memorizedTotal = memorizedRows.length
 
   // عدد المتأخرات (خارج خطة اليوم — ما لم يُجدول بعد)
   const todayPlanPages = new Set<number>()
@@ -586,6 +608,56 @@ export async function buildAppState(): Promise<AppState> {
   const overdueCount = pageRows.filter(
     (p) => p.memorized && p.dueDate && p.dueDate < today && !todayPlanPages.has(p.page)
   ).length
+
+  // ---- دورة الأمان (قاعدة عدم النسيان) ----
+  const maxGap = effectiveMaxGap(profile.maxGapDays)
+  const requiredDaily = memorizedTotal > 0 ? Math.ceil(memorizedTotal / maxGap) : 0
+  const currentCycleDays =
+    memorizedTotal > 0 && profile.dailyCapacity > 0 ? Math.ceil(memorizedTotal / profile.dailyCapacity) : 0
+  const windowStart = addDays(today, -(maxGap - 1))
+  const coveredPages = memorizedRows.filter(
+    (p) => p.reviews > 0 && p.lastReviewedAt && dateOnlyInTz(p.lastReviewedAt, profile.timezone) >= windowStart
+  ).length
+  const coveragePct = memorizedTotal > 0 ? coveredPages / memorizedTotal : 1
+
+  // ---- الصفحات الأكثر احتياجاً للمراجعة (خارج ورد اليوم) ----
+  const attention: AttentionPage[] = memorizedRows
+    .filter((p) => !todayPlanPages.has(p.page))
+    .map((p) => {
+      const risk = riskScore(p, today)
+      const od = p.dueDate ? Math.max(0, diffDays(today, p.dueDate)) : 0
+      let reason = ""
+      let kind: AttentionPage["kind"] = "weak"
+      if (p.reviews === 0) {
+        reason = "لم تُراجعها بعد"
+        kind = "never"
+      } else if (od >= 1) {
+        reason = `متأخرة ${formatDays(od)}`
+        kind = "overdue"
+      } else if (p.strength <= 1) {
+        reason = "ضعيفة — تحتاج تثبيتاً"
+        kind = "weak"
+      } else if (p.misses >= 2) {
+        reason = `فاتتها ${p.misses} ${p.misses === 2 ? "مرتين" : "مرات"} من قبل`
+        kind = "misses"
+      } else {
+        reason = "مستحقة قريباً — راقبها"
+        kind = "weak"
+      }
+      return {
+        page: p.page,
+        juz: pageToJuz(p.page),
+        label: pagesLabel(p.page, p.page),
+        reason,
+        kind,
+        overdueDays: od,
+        strength: p.strength,
+        risk,
+      }
+    })
+    .filter((a) => a.risk >= 3)
+    .sort((a, b) => b.risk - a.risk || a.page - b.page)
+    .slice(0, 10)
 
   // توقعات الأسبوع
   const forecast: { date: string; count: number }[] = []
@@ -610,7 +682,7 @@ export async function buildAppState(): Promise<AppState> {
       ? last30.reduce((s, a) => s + a.doneTasks / a.totalTasks, 0) / last30.length
       : 0
   const remainingFirstPass = pageRows.filter((p) => p.memorized && p.reviews === 0).length
-  const cycleDays = profile.dailyCapacity > 0 ? Math.ceil(remainingFirstPass / profile.dailyCapacity) : 0
+  const cycleDays = currentCycleDays // الدورة الكاملة الفعلية بسعتك الحالية
   const perfectDays = activityRows.filter((a) => a.totalTasks > 0 && a.doneTasks === a.totalTasks).length
 
   // الأوسمة
@@ -694,6 +766,7 @@ export async function buildAppState(): Promise<AppState> {
       xp: profile.xp,
       streak: profile.streak,
       bestStreak: profile.bestStreak,
+      maxGapDays: maxGap,
     },
     level,
     plan,
@@ -708,6 +781,16 @@ export async function buildAppState(): Promise<AppState> {
     })),
     motivation: motivationFor(today),
     memorized: { total: memorizedTotal, strengths },
+    cycle: {
+      targetDays: maxGap,
+      memorizedTotal,
+      currentCycleDays,
+      requiredDaily,
+      coveragePct,
+      coveredPages,
+      onTrack: currentCycleDays <= maxGap,
+    },
+    attention,
     stats: {
       totalDonePages,
       completionRate,

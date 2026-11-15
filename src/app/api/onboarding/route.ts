@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import { applyOnboarding } from "@/lib/engine"
-import type { Intensity } from "@/lib/content"
+import { MAX_CAPACITY, MAX_UNIT_SIZE, type Intensity } from "@/lib/content"
 
 export const dynamic = "force-dynamic"
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { name, ranges, baseline, dailyCapacity, unitSize, intensity, autoAdjust } = body as {
+    const { name, ranges, baseline, dailyCapacity, unitSize, intensity, maxGapDays, autoAdjust } = body as {
       name?: string
       ranges?: { from: number; to: number }[]
       baseline?: number
       dailyCapacity?: number
       unitSize?: number
       intensity?: Intensity
+      maxGapDays?: number
       autoAdjust?: boolean
     }
 
@@ -30,9 +31,10 @@ export async function POST(req: NextRequest) {
       name: (name ?? "").toString().slice(0, 40),
       ranges,
       baseline: Math.max(0, Math.min(4, Number(baseline ?? 0))),
-      dailyCapacity: Math.max(1, Math.min(10, Number(dailyCapacity ?? 3))),
-      unitSize: Math.max(1, Math.min(5, Number(unitSize ?? 1))),
+      dailyCapacity: Math.max(1, Math.min(MAX_CAPACITY, Number(dailyCapacity ?? 3))),
+      unitSize: Math.max(1, Math.min(MAX_UNIT_SIZE, Number(unitSize ?? 1))),
       intensity: (intensity ?? "balanced") as Intensity,
+      maxGapDays: Math.max(3, Math.min(30, Number(maxGapDays ?? 10))),
       autoAdjust: autoAdjust !== false,
     })
     return NextResponse.json(result)

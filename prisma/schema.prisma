@@ -16,6 +16,7 @@ model Profile {
   dailyCapacity Int      @default(3) // عدد الصفحات المستهدفة يومياً
   unitSize      Int      @default(1) // صفحات المهمة الواحدة
   intensity     String   @default("balanced") // relaxed | balanced | intensive
+  maxGapDays    Int      @default(10) // قاعدة عدم النسيان: أقصى عدد أيام بدون مراجعة أي صفحة
   autoAdjust    Boolean  @default(true)
   xp            Int      @default(0)
   streak        Int      @default(0)

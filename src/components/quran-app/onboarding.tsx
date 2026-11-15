@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { PageGrid } from "./page-grid"
 import { Logo } from "./logo"
 import { BASELINE_META, INTENSITY_META, type Intensity } from "@/lib/content"
-import { formatPages, pagesToRanges } from "@/lib/format"
+import { formatDays, formatPages, pagesToRanges } from "@/lib/format"
 import { juzPageRange } from "@/lib/quran"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
@@ -25,6 +25,7 @@ import {
   Target,
   Wand2,
   HeartHandshake,
+  ShieldCheck,
   Check,
 } from "lucide-react"
 
@@ -45,6 +46,11 @@ export function OnboardingView({ onComplete }: { onComplete: () => void }) {
   const [submitting, setSubmitting] = useState(false)
 
   const totalSelected = selected.size
+  // هدف عدم النسيان: كل الحفظ يُراجع كل 10 أيام
+  const suggestedCapacity = totalSelected > 0 ? Math.ceil(totalSelected / 10) : 0
+  const meetsTarget = capacity >= suggestedCapacity
+  const firstPassDays = Math.ceil(totalSelected / capacity)
+  const sliderMax = Math.max(10, suggestedCapacity, capacity)
 
   const togglePage = (page: number) => {
     setSelected((prev) => {
@@ -108,8 +114,6 @@ export function OnboardingView({ onComplete }: { onComplete: () => void }) {
       setSubmitting(false)
     }
   }
-
-  const firstPassDays = Math.ceil(totalSelected / capacity)
 
   return (
     <div className="flex min-h-screen flex-col bg-background pattern-islamic">
@@ -304,9 +308,9 @@ export function OnboardingView({ onComplete }: { onComplete: () => void }) {
                   <Badge variant="secondary" className="text-sm font-extrabold tabular-nums">{capacity}</Badge>
                 </div>
                 <Slider
-                  value={[capacity]}
+                  value={[Math.min(capacity, sliderMax)]}
                   min={1}
-                  max={10}
+                  max={sliderMax}
                   step={1}
                   onValueChange={(v) => setCapacity(v[0])}
                   aria-label="عدد الصفحات اليومي"
@@ -314,6 +318,47 @@ export function OnboardingView({ onComplete }: { onComplete: () => void }) {
                 <p className="text-xs text-muted-foreground">
                   {capacity <= 2 ? "بداية هادئة ومستدامة — أحب الأعمال أدومها وإن قل" : capacity <= 5 ? "وتيرة متوازنة تناسب معظم المراجعين" : "وتيرة حماسية — تأكد أنك قادر على المداومة"}
                 </p>
+
+                {totalSelected > 0 && (
+                  <div
+                    className={cn(
+                      "space-y-2.5 rounded-xl border p-4 text-xs leading-6",
+                      meetsTarget
+                        ? "border-emerald-300/70 bg-emerald-50/70 text-emerald-900 dark:border-emerald-700/40 dark:bg-emerald-950/30 dark:text-emerald-200/90"
+                        : "border-amber-300/70 bg-amber-50/70 text-amber-900 dark:border-amber-600/40 dark:bg-amber-950/30 dark:text-amber-100/90"
+                    )}
+                  >
+                    <p className="flex items-center gap-1.5 font-bold">
+                      <ShieldCheck className="h-4 w-4 shrink-0" />
+                      دورة الأمان — كل حفظك كل 10 أيام
+                    </p>
+                    {meetsTarget ? (
+                      <p>
+                        حفظك {formatPages(totalSelected)} — بسعة {capacity} صفحة/يوم ستكمل دورة كاملة على كل حفظك خلال{" "}
+                        <span className="font-bold">{formatDays(firstPassDays)}</span> فلن تنسى القديم بإذن الله.
+                      </p>
+                    ) : (
+                      <div className="space-y-2.5">
+                        <p>
+                          حفظك {formatPages(totalSelected)} — لمراجعته كاملاً كل 10 أيام ننصح بسعة{" "}
+                          <span className="font-bold">{suggestedCapacity} صفحة/يوم</span>. بسعتك الحالية ستكون دورتك ≈{" "}
+                          <span className="font-bold">{formatDays(firstPassDays)}</span> — وسيركز النظام دائماً على
+                          الأضعف حتى لا يُنسى مهما كانت سعتك.
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="h-8 gap-1.5"
+                          onClick={() => setCapacity(suggestedCapacity)}
+                        >
+                          <Wand2 className="h-3.5 w-3.5" />
+                          طبّق السعة الموصى بها ({suggestedCapacity})
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* حجم المهمة */}
@@ -413,9 +458,23 @@ export function OnboardingView({ onComplete }: { onComplete: () => void }) {
               <div className="rounded-xl border border-gold/40 bg-gold/10 p-4 text-sm leading-7">
                 <p className="font-bold text-foreground">توقعنا لرحلتك:</p>
                 <p className="text-muted-foreground">
-                  ستبدأ بمراجعة <span className="font-bold text-foreground">{capacity}</span> صفحات يومياً، وبذلك تكمل الجولة الأولى
-                  على كل حفظك خلال <span className="font-bold text-foreground">{firstPassDays} يوماً تقريباً</span> — ثم يستمر
-                  النظام في إعادة كل صفحة إليك قبل نسيانها، بفضل الله.
+                  ستراجع <span className="font-bold text-foreground">{capacity}</span> صفحات يومياً{" "}
+                  {totalSelected > 0 && meetsTarget ? (
+                    <>
+                      — وبذلك تكمل دورة كاملة على كل حفظك ({formatPages(totalSelected)}) كل{" "}
+                      <span className="font-bold text-foreground">{formatDays(Math.ceil(totalSelected / capacity))}</span>{" "}
+                      فلا يُنسى القديم أبداً بإذن الله.
+                    </>
+                  ) : totalSelected > 0 ? (
+                    <>
+                      — ودورتك الكاملة على كل حفظك ستكون ≈{" "}
+                      <span className="font-bold text-foreground">{formatDays(Math.ceil(totalSelected / capacity))}</span>.
+                      لا تقلق: النظام يبدأ دائماً بالصفحات الأعلى خطورة على النسيان، فالضعيف لا يفلت، ويمكنك رفع سعتك في أي
+                      وقت من الإعدادات لتقصير الدورة.
+                    </>
+                  ) : (
+                    <>— ويكيف النظام خطتك يومياً بما يناسب قدرتك.</>
+                  )}
                 </p>
               </div>
 
