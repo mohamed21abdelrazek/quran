@@ -46,9 +46,10 @@ interface ViewProps {
   state: AppState
   load: () => Promise<void>
   action: (url: string, body: unknown) => Promise<Record<string, unknown>>
+  openWird: (from: number, to: number, label: string) => void
 }
 
-export function DashboardView({ state, load, action }: ViewProps) {
+export function DashboardView({ state, load, action, openWird }: ViewProps) {
   const { toast } = useToast()
   const [busyTask, setBusyTask] = useState<number | null>(null)
   const [applyingCapacity, setApplyingCapacity] = useState(false)
@@ -359,6 +360,7 @@ export function DashboardView({ state, load, action }: ViewProps) {
               busy={busyTask === task.id}
               onComplete={complete}
               onSnooze={snooze}
+              onOpen={(t) => openWird(t.pageFrom, t.pageTo, t.label)}
             />
           ))}
         </div>
@@ -474,6 +476,15 @@ export function DashboardView({ state, load, action }: ViewProps) {
                               />
                             ))}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => openWird(a.page, a.page, a.label)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                            title={`افتح صفحة ${a.page} في المصحف`}
+                            aria-label={`افتح صفحة ${a.page} في المصحف`}
+                          >
+                            <BookOpen className="h-4 w-4" />
+                          </button>
                         </div>
                       </div>
                     )
@@ -554,11 +565,13 @@ function TaskCard({
   busy,
   onComplete,
   onSnooze,
+  onOpen,
 }: {
   task: TaskDTO
   busy: boolean
   onComplete: (task: TaskDTO, quality: Quality) => void
   onSnooze: (task: TaskDTO) => void
+  onOpen: (task: TaskDTO) => void
 }) {
   const qualityButtons: { q: Quality; label: string; icon: typeof Check; cls: string }[] = [
     {
@@ -616,16 +629,28 @@ function TaskCard({
               {task.dueLabel}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => onSnooze(task)}
-            disabled={busy}
-            className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-            title="أجل المهمة إلى الغد"
-          >
-            <Clock className="h-3.5 w-3.5" />
-            تأجيل
-          </button>
+          <div className="flex flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={() => onOpen(task)}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300/70 bg-emerald-50 px-3 py-1.5 text-xs font-extrabold text-emerald-800 transition-all hover:border-emerald-400 hover:shadow-sm disabled:opacity-50 dark:border-emerald-700/50 dark:bg-emerald-950/40 dark:text-emerald-300"
+              title="افتح هذا الوِرد في المصحف مباشرة"
+            >
+              <BookOpen className="h-4 w-4" />
+              اذهب للوِرد
+            </button>
+            <button
+              type="button"
+              onClick={() => onSnooze(task)}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+              title="أجل المهمة إلى الغد"
+            >
+              <Clock className="h-3.5 w-3.5" />
+              تأجيل
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 grid grid-cols-3 gap-2">

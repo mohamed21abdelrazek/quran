@@ -1,0 +1,689 @@
+     1→"use client"
+     2→
+     3→import { useEffect, useMemo, useState } from "react"
+     4→import { Button } from "@/components/ui/button"
+     5→import { Card, CardContent } from "@/components/ui/card"
+     6→import { Badge } from "@/components/ui/badge"
+     7→import { ProgressRing } from "./progress-ring"
+     8→import { fireConfetti } from "@/hooks/use-app"
+     9→import type { AppState, TaskDTO } from "@/lib/types"
+    10→import type { Quality } from "@/lib/content"
+    11→import { dateAr, formatDays, formatPages, weekdayShortAr } from "@/lib/format"
+    12→import { cn } from "@/lib/utils"
+    13→import { useToast } from "@/hooks/use-toast"
+    14→import {
+    15→  AlertDialog,
+    16→  AlertDialogAction,
+    17→  AlertDialogCancel,
+    18→  AlertDialogContent,
+    19→  AlertDialogDescription,
+    20→  AlertDialogFooter,
+    21→  AlertDialogHeader,
+    22→  AlertDialogTitle,
+    23→  AlertDialogTrigger,
+    24→} from "@/components/ui/alert-dialog"
+    25→import {
+    26→  Flame,
+    27→  Trophy,
+    28→  CheckCheck,
+    29→  Check,
+    30→  AlertTriangle,
+    31→  Clock,
+    32→  BookOpen,
+    33→  Sparkles,
+    34→  PartyPopper,
+    35→  CalendarDays,
+    36→  Hourglass,
+    37→  Star,
+    38→  ShieldCheck,
+    39→  Crosshair,
+    40→  Wand2,
+    41→  Loader2,
+    42→  Eye,
+    43→} from "lucide-react"
+    44→
+    45→interface ViewProps {
+    46→  state: AppState
+    47→  load: () => Promise<void>
+    48→  action: (url: string, body: unknown) => Promise<Record<string, unknown>>
+    49→}
+    50→
+    51→export function DashboardView({ state, load, action }: ViewProps) {
+    52→  const { toast } = useToast()
+    53→  const [busyTask, setBusyTask] = useState<number | null>(null)
+    54→  const [applyingCapacity, setApplyingCapacity] = useState(false)
+    55→
+    56→  const plan = state.plan
+    57→  const tasks = plan?.tasks ?? []
+    58→  const pendingTasks = tasks.filter((t) => t.status === "pending")
+    59→  const finishedTasks = tasks.filter((t) => t.status !== "pending")
+    60→  const donePages = tasks.filter((t) => t.status === "done").reduce((s, t) => s + t.pages, 0)
+    61→  const planPages = tasks.reduce((s, t) => s + t.pages, 0)
+    62→  const allDone = tasks.length > 0 && tasks.every((t) => t.status === "done")
+    63→
+    64→  const hour = new Date().getHours()
+    65→  const greeting =
+    66→    hour < 5 ? "أسعد الله ليلتك" : hour < 12 ? "صباح الخير" : hour < 17 ? "طاب يومك" : "مساء الخير"
+    67→
+    68→  const hijriDate = useMemo(() => {
+    69→    try {
+    70→      return new Intl.DateTimeFormat("ar-EG-u-ca-islamic-umalqura", {
+    71→        day: "numeric",
+    72→        month: "long",
+    73→        year: "numeric",
+    74→      }).format(new Date())
+    75→    } catch {
+    76→      return ""
+    77→    }
+    78→  }, [])
+    79→
+    80→  const complete = async (task: TaskDTO, quality: Quality) => {
+    81→    setBusyTask(task.id)
+    82→    try {
+    83→      const res = await action("/api/task", { taskId: task.id, action: "complete", quality })
+    84→      if (res.allDone) {
+    85→        fireConfetti()
+    86→        toast({
+    87→          title: "تقبل الله منك!",
+    88→          description: "أنجزت ورد اليوم كاملاً — أحسنت وبارك الله فيك",
+    89→        })
+    90→      } else {
+    91→        const msgs: Record<Quality, string> = {
+    92→          perfect: "ما شاء الله! رفعنا قوة هذه الصفحات",
+    93→          good: "أحسنت! سنراها مرة أخرى في وقتها",
+    94→          hard: "لا بأس — سنراجعها قريباً لتثبت أكثر",
+    95→        }
+    96→        toast({ title: "سُجلت المراجعة", description: msgs[quality] })
+    97→      }
+    98→      await load()
+    99→    } catch (e) {
+   100→      toast({ title: "خطأ", description: e instanceof Error ? e.message : "حاول مرة أخرى" })
+   101→    } finally {
+   102→      setBusyTask(null)
+   103→    }
+   104→  }
+   105→
+   106→  const snooze = async (task: TaskDTO) => {
+   107→    setBusyTask(task.id)
+   108→    try {
+   109→      await action("/api/task", { taskId: task.id, action: "snooze" })
+   110→      toast({ title: "أجّلناها إلى الغد", description: "ستكون أول ما يظهر في ورد الغد إن شاء الله" })
+   111→      await load()
+   112→    } catch (e) {
+   113→      toast({ title: "خطأ", description: e instanceof Error ? e.message : "حاول مرة أخرى" })
+   114→    } finally {
+   115→      setBusyTask(null)
+   116→    }
+   117→  }
+   118→
+   119→  const cannotToday = async () => {
+   120→    try {
+   121→      await action("/api/day", { action: "cannot" })
+   122→      toast({
+   123→        title: "لا مشكلة أبداً",
+   124→        description: "أعدنا جدولة ورد اليوم ليوم غد، وسنوازن خطتك تلقائياً بما يناسبك",
+   125→      })
+   126→      await load()
+   127→    } catch (e) {
+   128→      toast({ title: "خطأ", description: e instanceof Error ? e.message : "حاول مرة أخرى" })
+   129→    }
+   130→  }
+   131→
+   132→  const applySuggestedCapacity = async () => {
+   133→    setApplyingCapacity(true)
+   134→    try {
+   135→      await action("/api/settings", { dailyCapacity: state.cycle.requiredDaily })
+   136→      toast({
+   137→        title: "تم ضبط سعتك",
+   138→        description: `أصبح وردك ${state.cycle.requiredDaily} صفحة يومياً — تكمل كل حفظك كل ${formatDays(state.cycle.targetDays)} بإذن الله`,
+   139→      })
+   140→      await load()
+   141→    } catch (e) {
+   142→      toast({ title: "خطأ", description: e instanceof Error ? e.message : "حاول مرة أخرى" })
+   143→    } finally {
+   144→      setApplyingCapacity(false)
+   145→    }
+   146→  }
+   147→
+   148→  return (
+   149→    <div className="space-y-5">
+   150→      {/* بطاقة الترحيب */}
+   151→      <Card className="overflow-hidden border-0 bg-gradient-to-bl from-emerald-800 via-emerald-700 to-teal-800 text-white glow-emerald">
+   152→        <div className="pattern-islamic-light">
+   153→          <CardContent className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-7">
+   154→            <div className="space-y-3 text-center sm:text-right">
+   155→              <div>
+   156→                <h2 className="text-2xl font-extrabold sm:text-3xl">
+   157→                  {greeting} {state.profile.name || "يا حافظ القرآن"}
+   158→                </h2>
+   159→                <p className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-white/75 sm:justify-start sm:text-sm">
+   160→                  <span className="inline-flex items-center gap-1">
+   161→                    <CalendarDays className="h-3.5 w-3.5" />
+   162→                    {dateAr(state.today)}
+   163→                  </span>
+   164→                  {hijriDate && <span className="text-gold">• {hijriDate}</span>}
+   165→                </p>
+   166→              </div>
+   167→              <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+   168→                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold backdrop-blur-sm">
+   169→                  <Flame className="h-4 w-4 text-amber-300" />
+   170→                  {state.profile.streak > 0 ? `${state.profile.streak} يوم متتابع` : "ابدأ سلسلتك اليوم"}
+   171→                </span>
+   172→                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold backdrop-blur-sm">
+   173→                  <Star className="h-4 w-4 text-amber-300" />
+   174→                  {state.level.name} • {state.profile.xp} نقطة
+   175→                </span>
+   176→              </div>
+   177→            </div>
+   178→            <div className="flex shrink-0 justify-center">
+   179→              <ProgressRing
+   180→                value={donePages}
+   181→                max={planPages}
+   182→                size={132}
+   183→                label={planPages > 0 ? `${donePages}/${planPages}` : "—"}
+   184→                sublabel="من ورد اليوم"
+   185→              />
+   186→            </div>
+   187→          </CardContent>
+   188→        </div>
+   189→      </Card>
+   190→
+   191→      {/* بطاقة دورة الأمان — قاعدة عدم النسيان */}
+   192→      {state.cycle.memorizedTotal > 0 && (
+   193→        <Card
+   194→          className={cn(
+   195→            "animate-in fade-in-50 border shadow-sm",
+   196→            state.cycle.onTrack
+   197→              ? "border-emerald-300/70 bg-emerald-50/70 dark:border-emerald-700/50 dark:bg-emerald-950/30"
+   198→              : "border-amber-300/70 bg-amber-50/70 dark:border-amber-600/40 dark:bg-amber-950/30"
+   199→          )}
+   200→        >
+   201→          <CardContent className="space-y-3.5 p-4 sm:p-5">
+   202→            <div className="flex flex-wrap items-center justify-between gap-2">
+   203→              <div className="flex items-center gap-2">
+   204→                <span
+   205→                  className={cn(
+   206→                    "flex h-9 w-9 items-center justify-center rounded-xl",
+   207→                    state.cycle.onTrack
+   208→                      ? "bg-emerald-600/15 text-emerald-700 dark:text-emerald-300"
+   209→                      : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+   210→                  )}
+   211→                >
+   212→                  <ShieldCheck className="h-5 w-5" />
+   213→                </span>
+   214→                <div>
+   215→                  <p className="text-sm font-extrabold">دورة الأمان — كل حفظك خلال {formatDays(state.cycle.targetDays)}</p>
+   216→                  <p className="text-[11px] text-muted-foreground">
+   217→                    قاعدة عدم النسيان: لا صفحة تنتظر أكثر من {state.cycle.targetDays} أيام
+   218→                  </p>
+   219→                </div>
+   220→              </div>
+   221→              <span
+   222→                className={cn(
+   223→                  "rounded-full px-3 py-1 text-xs font-extrabold tabular-nums",
+   224→                  state.cycle.onTrack
+   225→                    ? "bg-emerald-600 text-white"
+   226→                    : "bg-amber-500 text-white"
+   227→                )}
+   228→              >
+   229→                {Math.round(state.cycle.coveragePct * 100)}%
+   230→              </span>
+   231→            </div>
+   232→
+   233→            {/* شريط التغطية */}
+   234→            <div>
+   235→              <div
+   236→                className="h-2.5 overflow-hidden rounded-full bg-white/60 dark:bg-black/25"
+   237→                role="progressbar"
+   238→                aria-valuenow={Math.round(state.cycle.coveragePct * 100)}
+   239→                aria-valuemin={0}
+   240→                aria-valuemax={100}
+   241→                aria-label="نسبة الحفظ المراجَع خلال دورة الأمان"
+   242→              >
+   243→                <div
+   244→                  className={cn(
+   245→                    "h-full rounded-full transition-all duration-700",
+   246→                    state.cycle.onTrack
+   247→                      ? "bg-gradient-to-l from-emerald-600 to-teal-500"
+   248→                      : "bg-gradient-to-l from-amber-500 to-orange-400"
+   249→                  )}
+   250→                  style={{ width: `${Math.max(3, Math.round(state.cycle.coveragePct * 100))}%` }}
+   251→                />
+   252→              </div>
+   253→              <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+   254→                راجعت <span className="font-bold text-foreground">{state.cycle.coveredPages}</span> من {" "}
+   255→                <span className="font-bold text-foreground">{state.cycle.memorizedTotal}</span> صفحة محفوظة خلال آخر{" "}
+   256→                {formatDays(state.cycle.targetDays)}
+   257→              </p>
+   258→            </div>
+   259→
+   260→            {/* الحالة والتوجيه */}
+   261→            {state.cycle.onTrack ? (
+   262→              <p className="flex items-start gap-2 text-xs leading-6 text-emerald-800 dark:text-emerald-200/90">
+   263→                <Check className="mt-0.5 h-4 w-4 shrink-0" />
+   264→                أنت على المسار الصحيح — دورتك الكاملة {formatDays(state.cycle.currentCycleDays)} ووردك دائماً في حدود قدرتك.
+   265→              </p>
+   266→            ) : (
+   267→              <div className="space-y-2.5 rounded-xl border border-amber-300/60 bg-white/70 p-3 dark:border-amber-600/30 dark:bg-black/20">
+   268→                <p className="text-xs leading-6 text-amber-900 dark:text-amber-100/90">
+   269→                  بسعتك الحالية (<span className="font-bold">{state.profile.dailyCapacity}</span> صفحة/يوم) دورتك الكاملة ≈{" "}
+   270→                  <span className="font-bold">{formatDays(state.cycle.currentCycleDays)}</span> — لضمان عدم النسيان راجع{" "}
+   271→                  <span className="font-bold">{state.cycle.requiredDaily}</span> صفحة يومياً.
+   272→                </p>
+   273→                <p className="text-[11px] leading-5 text-muted-foreground">
+   274→                  لا تقلق: وردك يبدأ دائماً بالأعلى خطراً على النسيان، فالضعيف لا يفلت أبداً مهما كانت سعتك.
+   275→                </p>
+   276→                <Button
+   277→                  size="sm"
+   278→                  onClick={applySuggestedCapacity}
+   279→                  disabled={applyingCapacity}
+   280→                  className="h-9 gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+   281→                >
+   282→                  {applyingCapacity ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+   283→                  اضبط سعتي تلقائياً ({state.cycle.requiredDaily} صفحة/يوم)
+   284→                </Button>
+   285→              </div>
+   286→            )}
+   287→          </CardContent>
+   288→        </Card>
+   289→      )}
+   290→
+   291→      {/* احتفال اكتمال اليوم */}
+   292→      {allDone && (
+   293→        <Card className="animate-in fade-in-50 zoom-in-95 border-emerald-300/60 bg-emerald-50 dark:border-emerald-700/50 dark:bg-emerald-950/40">
+   294→          <CardContent className="flex items-center gap-4 p-5">
+   295→            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-white">
+   296→              <PartyPopper className="h-7 w-7" />
+   297→            </div>
+   298→            <div>
+   299→              <p className="text-base font-extrabold text-emerald-900 dark:text-emerald-200">
+   300→                أنجزت ورد اليوم كاملاً — تقبل الله منك!
+   301→              </p>
+   302→              <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-300/80">
+   303→                كسبت 30 نقطة إضافية. استراحة مستحقة، ونراك غداً في موعدك مع كتاب الله.
+   304→              </p>
+   305→            </div>
+   306→          </CardContent>
+   307→        </Card>
+   308→      )}
+   309→
+   310→      {/* تنبيه المتأخرات */}
+   311→      {state.overdueCount > 0 && !allDone && (
+   312→        <Card className="border-amber-300/70 bg-amber-50/80 dark:border-amber-600/40 dark:bg-amber-950/30">
+   313→          <CardContent className="flex items-start gap-3 p-4">
+   314→            <Hourglass className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+   315→            <div className="text-sm leading-6">
+   316→              <span className="font-bold text-amber-900 dark:text-amber-200">
+   317→                لديك {formatPages(state.overdueCount)} متأخرة عن موعدها.
+   318→              </span>{" "}
+   319→              <span className="text-amber-800/80 dark:text-amber-300/80">
+   320→                وردك يبدأ دائماً بالأعلى خطورة على النسيان — فالأكثر تأخراً والأضعف يظهر لك أولاً حتى لا يفلت شيء.
+   321→              </span>
+   322→            </div>
+   323→          </CardContent>
+   324→        </Card>
+   325→      )}
+   326→
+   327→      {/* ورد اليوم */}
+   328→      <section aria-label="ورد اليوم" className="space-y-3">
+   329→        <div className="flex items-center justify-between">
+   330→          <h3 className="flex items-center gap-2 text-lg font-extrabold">
+   331→            <BookOpen className="h-5 w-5 text-primary" />
+   332→            ورد اليوم
+   333→          </h3>
+   334→          {plan && (
+   335→            <Badge variant="secondary" className="gap-1 font-bold">
+   336→              <Sparkles className="h-3.5 w-3.5 text-gold" />
+   337→              سعة اليوم: {plan.capacity} صفحات
+   338→            </Badge>
+   339→          )}
+   340→        </div>
+   341→
+   342→        {tasks.length === 0 && (
+   343→          <Card>
+   344→            <CardContent className="flex flex-col items-center gap-3 p-8 text-center">
+   345→              <BookOpen className="h-10 w-10 text-muted-foreground/40" />
+   346→              <p className="text-sm text-muted-foreground">
+   347→                لا توجد مهام اليوم. أضف صفحات محفوظة من الإعدادات ليبدأ وِردي بتخطيط مراجعاتك.
+   348→              </p>
+   349→            </CardContent>
+   350→          </Card>
+   351→        )}
+   352→
+   353→        {/* المهام المعلقة */}
+   354→        <div className="space-y-3">
+   355→          {pendingTasks.map((task) => (
+   356→            <TaskCard
+   357→              key={task.id}
+   358→              task={task}
+   359→              busy={busyTask === task.id}
+   360→              onComplete={complete}
+   361→              onSnooze={snooze}
+   362→            />
+   363→          ))}
+   364→        </div>
+   365→
+   366→        {/* المهام المنتهية */}
+   367→        {finishedTasks.length > 0 && (
+   368→          <div className="space-y-2 pt-2">
+   369→            <p className="text-xs font-bold text-muted-foreground">ما تم اليوم</p>
+   370→            <div className="space-y-2">
+   371→              {finishedTasks.map((task) => (
+   372→                <FinishedTaskRow key={task.id} task={task} />
+   373→              ))}
+   374→            </div>
+   375→          </div>
+   376→        )}
+   377→
+   378→        {/* زر تعذر المراجعة */}
+   379→        {pendingTasks.length > 0 && (
+   380→          <AlertDialog>
+   381→            <AlertDialogTrigger asChild>
+   382→              <Button variant="ghost" className="w-full text-muted-foreground" size="sm">
+   383→                <AlertTriangle className="h-4 w-4" />
+   384→                لم أستطع المراجعة اليوم
+   385→              </Button>
+   386→            </AlertDialogTrigger>
+   387→            <AlertDialogContent>
+   388→              <AlertDialogHeader>
+   389→                <AlertDialogTitle>لم تستطع المراجعة اليوم؟</AlertDialogTitle>
+   390→                <AlertDialogDescription>
+   391→                  لا مشكلة أبداً — الديمومة أهم من الكمال. سنغلق ورد اليوم وننقل صفحاته إلى الغد، وسيتكيف النظام مع وتيرتك
+   392→                  تلقائياً.
+   393→                </AlertDialogDescription>
+   394→              </AlertDialogHeader>
+   395→              <AlertDialogFooter>
+   396→                <AlertDialogCancel>سأراجع شيئاً على الأقل</AlertDialogCancel>
+   397→                <AlertDialogAction onClick={cannotToday}>نعم، انقلها للغد</AlertDialogAction>
+   398→              </AlertDialogFooter>
+   399→            </AlertDialogContent>
+   400→          </AlertDialog>
+   401→        )}
+   402→      </section>
+   403→
+   404→      {/* الصفحات المحتاجة مراجعة — تركيز على الأضعف */}
+   405→      {state.cycle.memorizedTotal > 0 && (
+   406→        <section aria-label="الصفحات المحتاجة مراجعة" className="space-y-3">
+   407→          <div className="flex items-center justify-between">
+   408→            <h3 className="flex items-center gap-2 text-lg font-extrabold">
+   409→              <Crosshair className="h-5 w-5 text-primary" />
+   410→              تحتاج انتباهك
+   411→            </h3>
+   412→            {state.attention.length > 0 && (
+   413→              <Badge variant="secondary" className="text-[11px]">
+   414→                <Eye className="h-3 w-3" />
+   415→                الأعلى خطورة على النسيان
+   416→              </Badge>
+   417→            )}
+   418→          </div>
+   419→
+   420→          {state.attention.length === 0 ? (
+   421→            <Card className="border-emerald-300/60 bg-emerald-50/70 dark:border-emerald-700/40 dark:bg-emerald-950/25">
+   422→              <CardContent className="flex items-center gap-3 p-4">
+   423→                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600/15 text-emerald-700 dark:text-emerald-300">
+   424→                  <ShieldCheck className="h-5 w-5" />
+   425→                </span>
+   426→                <p className="text-sm leading-6 text-emerald-900 dark:text-emerald-200/90">
+   427→                  كل حفظك في أمان — لا توجد صفحات عالية الخطورة خارج ورد اليوم. استمر بارك الله فيك!
+   428→                </p>
+   429→              </CardContent>
+   430→            </Card>
+   431→          ) : (
+   432→            <Card className="border-border/60 shadow-sm">
+   433→              <CardContent className="p-3.5 sm:p-4">
+   434→                <p className="mb-3 text-xs leading-5 text-muted-foreground">
+   435→                  هذه الصفحات الأكثر عرضة للنسيان بعد ورد اليوم — كلما أنجزت وردك بانتظام تصفّت بسرعة، والمتأخر منها يظهر لك
+   436→                  أولاً في الأيام القادمة.
+   437→                </p>
+   438→                <div className="scroll-thin max-h-72 space-y-2 overflow-y-auto pl-1" dir="rtl">
+   439→                  {state.attention.map((a) => {
+   440→                    const kindMeta = {
+   441→                      never: { cls: "bg-gold/15 text-amber-700 dark:text-amber-300", icon: Sparkles },
+   442→                      overdue: { cls: "bg-orange-500/15 text-orange-700 dark:text-orange-300", icon: Hourglass },
+   443→                      weak: { cls: "bg-rose-500/10 text-rose-700 dark:text-rose-300", icon: AlertTriangle },
+   444→                      misses: { cls: "bg-teal-600/10 text-teal-700 dark:text-teal-300", icon: Clock },
+   445→                    }[a.kind]
+   446→                    const KindIcon = kindMeta.icon
+   447→                    return (
+   448→                      <div
+   449→                        key={a.page}
+   450→                        className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-muted/30 px-3 py-2"
+   451→                      >
+   452→                        <div className="flex min-w-0 items-center gap-2.5">
+   453→                          <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", kindMeta.cls)}>
+   454→                            <KindIcon className="h-3.5 w-3.5" />
+   455→                          </span>
+   456→                          <div className="min-w-0">
+   457→                            <p className="truncate text-sm font-bold">
+   458→                              {a.label}
+   459→                              <span className="mr-1.5 text-[11px] font-medium text-muted-foreground">جزء {a.juz}</span>
+   460→                            </p>
+   461→                            <p className="truncate text-[11px] text-muted-foreground">{a.reason}</p>
+   462→                          </div>
+   463→                        </div>
+   464→                        <div className="flex shrink-0 items-center gap-1">
+   465→                          {/* مؤشرات القوة الخمسة */}
+   466→                          <span className="hidden items-center gap-0.5 sm:flex" title={`قوة الصفحة: ${a.strength}/5`}>
+   467→                            {[0, 1, 2, 3, 4].map((i) => (
+   468→                              <span
+   469→                                key={i}
+   470→                                className={cn(
+   471→                                  "h-1.5 w-1.5 rounded-full",
+   472→                                  i < a.strength ? "bg-emerald-500" : "bg-muted-foreground/25"
+   473→                                )}
+   474→                              />
+   475→                            ))}
+   476→                          </span>
+   477→                        </div>
+   478→                      </div>
+   479→                    )
+   480→                  })}
+   481→                </div>
+   482→              </CardContent>
+   483→            </Card>
+   484→          )}
+   485→        </section>
+   486→      )}
+   487→
+   488→      {/* التحفيز اليومي */}
+   489→      <Card className="overflow-hidden border-gold/30 bg-gradient-to-bl from-amber-50 to-white dark:from-amber-950/20 dark:to-card">
+   490→        <CardContent className="p-5 sm:p-6">
+   491→          <div className="mb-3 flex items-center gap-2">
+   492→            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gold/20 text-gold">
+   493→              <Sparkles className="h-4 w-4" />
+   494→            </span>
+   495→            <p className="text-sm font-bold text-gold">
+   496→              {state.motivation.kind === "ayah" ? "آية اليوم" : state.motivation.kind === "hadith" ? "حديث اليوم" : "ومضة اليوم"}
+   497→            </p>
+   498→          </div>
+   499→          <p className="font-quran text-lg leading-9 text-foreground sm:text-xl" dir="rtl">
+   500→            {state.motivation.text}
+   501→          </p>
+   502→          <p className="mt-2 text-xs font-medium text-muted-foreground">{state.motivation.source}</p>
+   503→        </CardContent>
+   504→      </Card>
+   505→
+   506→      {/* توقعات الأسبوع */}
+   507→      {state.forecast.length > 0 && (
+   508→        <section aria-label="توقعات الأيام القادمة" className="space-y-3">
+   509→          <div className="flex items-center justify-between">
+   510→            <h3 className="flex items-center gap-2 text-lg font-extrabold">
+   511→              <CalendarDays className="h-5 w-5 text-primary" />
+   512→              الأيام القادمة
+   513→            </h3>
+   514→            <p className="text-xs text-muted-foreground">الصفحات المستحقة لكل يوم</p>
+   515→          </div>
+   516→          <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+   517→            {state.forecast.map((f) => {
+   518→              const heavy = f.count > state.profile.dailyCapacity
+   519→              return (
+   520→                <div
+   521→                  key={f.date}
+   522→                  title={`${dateAr(f.date)} — ${f.count} صفحة مستحقة`}
+   523→                  className={cn(
+   524→                    "flex flex-col items-center gap-1 rounded-xl border p-2 text-center transition-colors sm:p-3",
+   525→                    heavy
+   526→                      ? "border-amber-300/70 bg-amber-50/70 dark:border-amber-600/40 dark:bg-amber-950/30"
+   527→                      : "border-border/60 bg-card"
+   528→                  )}
+   529→                >
+   530→                  <span className="text-[10px] font-bold text-muted-foreground sm:text-xs">{weekdayShortAr(f.date)}</span>
+   531→                  <span
+   532→                    className={cn(
+   533→                      "text-sm font-extrabold tabular-nums sm:text-lg",
+   534→                      heavy ? "text-amber-600 dark:text-amber-400" : f.count === 0 ? "text-muted-foreground/40" : "text-primary"
+   535→                    )}
+   536→                  >
+   537→                    {f.count}
+   538→                  </span>
+   539→                </div>
+   540→              )
+   541→            })}
+   542→          </div>
+   543→          <p className="text-center text-xs leading-5 text-muted-foreground">
+   544→            هذه أرقام استرشادية — وِردي يوازنها يومياً حتى لا يتراكم عليك الحمل أبداً.
+   545→          </p>
+   546→        </section>
+   547→      )}
+   548→    </div>
+   549→  )
+   550→}
+   551→
+   552→function TaskCard({
+   553→  task,
+   554→  busy,
+   555→  onComplete,
+   556→  onSnooze,
+   557→}: {
+   558→  task: TaskDTO
+   559→  busy: boolean
+   560→  onComplete: (task: TaskDTO, quality: Quality) => void
+   561→  onSnooze: (task: TaskDTO) => void
+   562→}) {
+   563→  const qualityButtons: { q: Quality; label: string; icon: typeof Check; cls: string }[] = [
+   564→    {
+   565→      q: "perfect",
+   566→      label: "أتقنتها",
+   567→      icon: CheckCheck,
+   568→      cls: "bg-emerald-600 hover:bg-emerald-700 text-white",
+   569→    },
+   570→    {
+   571→      q: "good",
+   572→      label: "جيدة",
+   573→      icon: Check,
+   574→      cls: "bg-amber-500 hover:bg-amber-600 text-white",
+   575→    },
+   576→    {
+   577→      q: "hard",
+   578→      label: "صعبة",
+   579→      icon: AlertTriangle,
+   580→      cls: "bg-orange-700/90 hover:bg-orange-700 text-white",
+   581→    },
+   582→  ]
+   583→
+   584→  return (
+   585→    <Card
+   586→      className={cn(
+   587→        "animate-in fade-in-50 border-border/70 shadow-sm transition-all",
+   588→        busy && "opacity-60"
+   589→      )}
+   590→    >
+   591→      <CardContent className="p-4 sm:p-5">
+   592→        <div className="flex flex-wrap items-start justify-between gap-3">
+   593→          <div className="space-y-1.5">
+   594→            <div className="flex flex-wrap items-center gap-2">
+   595→              <h4 className="text-lg font-extrabold text-foreground">{task.label}</h4>
+   596→              <Badge variant="outline" className="border-primary/30 text-primary">
+   597→                الجزء {task.juz}
+   598→              </Badge>
+   599→              {task.isNew && (
+   600→                <Badge className="bg-gold text-gold-foreground gap-1">
+   601→                  <Sparkles className="h-3 w-3" />
+   602→                  أول مراجعة
+   603→                </Badge>
+   604→              )}
+   605→            </div>
+   606→            <p className="text-xs leading-5 text-muted-foreground">
+   607→              السور: {task.surahs.slice(0, 4).join("، ")}
+   608→              {task.surahs.length > 4 ? " وغيرها" : ""}
+   609→            </p>
+   610→            <p
+   611→              className={cn(
+   612→                "text-xs font-bold",
+   613→                task.dueLabel.startsWith("متأخر") ? "text-amber-600 dark:text-amber-400" : "text-primary"
+   614→              )}
+   615→            >
+   616→              {task.dueLabel}
+   617→            </p>
+   618→          </div>
+   619→          <button
+   620→            type="button"
+   621→            onClick={() => onSnooze(task)}
+   622→            disabled={busy}
+   623→            className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+   624→            title="أجل المهمة إلى الغد"
+   625→          >
+   626→            <Clock className="h-3.5 w-3.5" />
+   627→            تأجيل
+   628→          </button>
+   629→        </div>
+   630→
+   631→        <div className="mt-4 grid grid-cols-3 gap-2">
+   632→          {qualityButtons.map((b) => (
+   633→            <Button
+   634→              key={b.q}
+   635→              size="sm"
+   636→              disabled={busy}
+   637→              onClick={() => onComplete(task, b.q)}
+   638→              className={cn("h-10 gap-1.5 text-xs font-bold sm:text-sm", b.cls)}
+   639→            >
+   640→              <b.icon className="h-4 w-4" />
+   641→              {b.label}
+   642→            </Button>
+   643→          ))}
+   644→        </div>
+   645→      </CardContent>
+   646→    </Card>
+   647→  )
+   648→}
+   649→
+   650→function FinishedTaskRow({ task }: { task: TaskDTO }) {
+   651→  const meta =
+   652→    task.quality === "perfect"
+   653→      ? { label: "أتقنتها", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300", icon: CheckCheck }
+   654→      : task.quality === "hard"
+   655→        ? { label: "صعبة", cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/50 dark:text-orange-300", icon: AlertTriangle }
+   656→        : { label: "جيدة", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300", icon: Check }
+   657→
+   658→  if (task.status === "done") {
+   659→    const Icon = meta.icon
+   660→    return (
+   661→      <div className="flex items-center justify-between rounded-xl border border-border/50 bg-muted/40 px-4 py-2.5">
+   662→        <div className="flex items-center gap-2.5">
+   663→          <span className={cn("flex h-7 w-7 items-center justify-center rounded-full", meta.cls)}>
+   664→            <Icon className="h-4 w-4" />
+   665→          </span>
+   666→          <span className="text-sm font-bold text-foreground/70 line-through decoration-primary/40">{task.label}</span>
+   667→        </div>
+   668→        <Badge variant="secondary" className="text-[11px]">{meta.label}</Badge>
+   669→      </div>
+   670→    )
+   671→  }
+   672→
+   673→  // مهمة مؤجلة أو فائتة
+   674→  const snoozed = task.status === "snoozed"
+   675→  return (
+   676→    <div className="flex items-center justify-between rounded-xl border border-dashed border-border/70 bg-muted/20 px-4 py-2.5">
+   677→      <div className="flex items-center gap-2.5">
+   678→        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-muted-foreground">
+   679→          <Clock className="h-4 w-4" />
+   680→        </span>
+   681→        <span className="text-sm font-bold text-muted-foreground">{task.label}</span>
+   682→      </div>
+   683→      <Badge variant="outline" className="text-[11px] text-muted-foreground">
+   684→        {snoozed ? "أُجّلت للغد" : "ستعود في خطتك"}
+   685→      </Badge>
+   686→    </div>
+   687→  )
+   688→}
+   689→

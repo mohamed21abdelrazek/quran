@@ -48,7 +48,7 @@
 :root {
   --radius: 0.875rem;
   --font-body: "Tajawal", "Segoe UI", Tahoma, system-ui, sans-serif;
-  --font-quran: "Amiri", "Scheherazade New", "Traditional Arabic", serif;
+  --font-quran: "Amiri Quran", "Amiri", "Scheherazade New", "Traditional Arabic", serif;
 
   --background: oklch(0.977 0.011 95);
   --foreground: oklch(0.25 0.03 155);

@@ -7,6 +7,7 @@ import { OnboardingView } from "@/components/quran-app/onboarding"
 import { DashboardView } from "@/components/quran-app/dashboard"
 import { ProgressView } from "@/components/quran-app/progress-view"
 import { SettingsView } from "@/components/quran-app/settings-view"
+import { MushafView, type WirdTarget } from "@/components/quran-app/mushaf-view"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useTheme } from "next-themes"
@@ -15,6 +16,7 @@ import {
   CalendarCheck2,
   TrendingUp,
   Settings2,
+  BookOpen,
   Sun,
   Moon,
   Flame,
@@ -22,7 +24,7 @@ import {
   RefreshCw,
 } from "lucide-react"
 
-type View = "today" | "progress" | "settings"
+type View = "today" | "mushaf" | "progress" | "settings"
 
 function ThemeToggle() {
   const { setTheme, resolvedTheme } = useTheme()
@@ -44,11 +46,18 @@ export default function Page() {
   const { state, loading, error, load, action } = useApp()
   const [view, setView] = useState<View>("today")
   const [refreshing, setRefreshing] = useState(false)
+  const [wird, setWird] = useState<WirdTarget | null>(null)
 
   const refresh = async () => {
     setRefreshing(true)
     await load()
     setRefreshing(false)
+  }
+
+  /** الانتقال المباشر إلى الوِرد داخل المصحف */
+  const openWird = (from: number, to: number, label: string) => {
+    setWird({ from, to, label })
+    setView("mushaf")
   }
 
   // شاشة التحميل
@@ -130,10 +139,14 @@ export default function Page() {
         {/* التبويبات */}
         <div className="mx-auto w-full max-w-5xl px-4 pb-2.5">
           <Tabs value={view} onValueChange={(v) => setView(v as View)}>
-            <TabsList className="grid h-11 w-full grid-cols-3">
+            <TabsList className="grid h-11 w-full grid-cols-4">
               <TabsTrigger value="today" className="gap-1.5 text-xs sm:text-sm">
                 <CalendarCheck2 className="h-4 w-4" />
                 يومي
+              </TabsTrigger>
+              <TabsTrigger value="mushaf" className="gap-1.5 text-xs sm:text-sm">
+                <BookOpen className="h-4 w-4" />
+                المصحف
               </TabsTrigger>
               <TabsTrigger value="progress" className="gap-1.5 text-xs sm:text-sm">
                 <TrendingUp className="h-4 w-4" />
@@ -150,7 +163,10 @@ export default function Page() {
 
       {/* المحتوى */}
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-5 sm:py-6">
-        {view === "today" && <DashboardView state={state} load={load} action={action} />}
+        {view === "today" && <DashboardView state={state} load={load} action={action} openWird={openWird} />}
+        {view === "mushaf" && (
+          <MushafView state={state} wird={wird} onCloseWird={() => setWird(null)} />
+        )}
         {view === "progress" && <ProgressView state={state} />}
         {view === "settings" && <SettingsView state={state} load={load} action={action} />}
       </main>
