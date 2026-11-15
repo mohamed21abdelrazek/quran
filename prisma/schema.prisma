@@ -1,0 +1,72 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ملف المستخدم الشخصي (تطبيق فردي)
+model Profile {
+  id            Int      @id @default(1)
+  onboarded     Boolean  @default(false)
+  name          String   @default("")
+  timezone      String   @default("Africa/Cairo")
+  dailyCapacity Int      @default(3) // عدد الصفحات المستهدفة يومياً
+  unitSize      Int      @default(1) // صفحات المهمة الواحدة
+  intensity     String   @default("balanced") // relaxed | balanced | intensive
+  autoAdjust    Boolean  @default(true)
+  xp            Int      @default(0)
+  streak        Int      @default(0)
+  bestStreak    Int      @default(0)
+  lastActiveDate String? // آخر يوم فيه مهمة منجزة YYYY-MM-DD
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// حالة كل صفحة من صفحات المصحف (1..604)
+model PageState {
+  page           Int      @id
+  memorized      Boolean  @default(false)
+  strength       Int      @default(0) // 0..5
+  reviews        Int      @default(0)
+  misses         Int      @default(0)
+  lastReviewedAt DateTime?
+  dueDate        String? // YYYY-MM-DD
+}
+
+// خطة اليوم
+model DailyPlan {
+  id          Int     @id @default(autoincrement())
+  date        String  @unique // YYYY-MM-DD
+  capacity    Int
+  status      String  @default("open") // open | completed | partial | missed
+  note        String?
+  generatedAt DateTime @default(now())
+  tasks       Task[]
+}
+
+// مهمة مراجعة داخل خطة
+model Task {
+  id          Int       @id @default(autoincrement())
+  planId      Int
+  plan        DailyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  pageFrom    Int
+  pageTo      Int
+  status      String    @default("pending") // pending | done | missed | snoozed
+  quality     String? // perfect | good | hard
+  snoozeCount Int       @default(0)
+  completedAt DateTime?
+}
+
+// سجل النشاط اليومي (للإحصاءات والسلاسل)
+model Activity {
+  id          Int    @id @default(autoincrement())
+  date        String @unique // YYYY-MM-DD
+  donePages   Int    @default(0)
+  doneTasks   Int    @default(0)
+  missedPages Int    @default(0)
+  totalTasks  Int    @default(0)
+  xpGained    Int    @default(0)
+}
