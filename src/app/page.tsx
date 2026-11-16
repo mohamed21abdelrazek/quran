@@ -22,6 +22,7 @@ import {
   Flame,
   Star,
   RefreshCw,
+  WifiOff,
 } from "lucide-react"
 
 type View = "today" | "mushaf" | "progress" | "settings"
@@ -43,7 +44,7 @@ function ThemeToggle() {
 }
 
 export default function Page() {
-  const { state, loading, error, load, action } = useApp()
+  const { state, loading, error, offline, load, action, patchTask } = useApp()
   const [view, setView] = useState<View>("today")
   const [refreshing, setRefreshing] = useState(false)
   const [wird, setWird] = useState<WirdTarget | null>(null)
@@ -108,6 +109,15 @@ export default function Page() {
           </div>
 
           <div className="flex items-center gap-1.5">
+            {offline && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-amber-300/60 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300"
+                title="يعمل الآن على نسخة محفوظة — إجراءاتك تُحفظ وترسل تلقائياً عند عودة الاتصال"
+              >
+                <WifiOff className="h-3.5 w-3.5" />
+                أوفلاين
+              </span>
+            )}
             <span
               className="hidden items-center gap-1 rounded-full border border-amber-300/50 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700 sm:inline-flex dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300"
               title="سلسلة الأيام المتتابعة"
@@ -163,9 +173,14 @@ export default function Page() {
 
       {/* المحتوى */}
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-5 sm:py-6">
-        {view === "today" && <DashboardView state={state} load={load} action={action} openWird={openWird} />}
+        {view === "today" && <DashboardView state={state} load={load} action={action} openWird={openWird} patchTask={patchTask} />}
         {view === "mushaf" && (
-          <MushafView state={state} wird={wird} onCloseWird={() => setWird(null)} />
+          <MushafView
+            key={wird ? `wird-${wird.from}-${wird.to}` : "free"}
+            state={state}
+            wird={wird}
+            onCloseWird={() => setWird(null)}
+          />
         )}
         {view === "progress" && <ProgressView state={state} />}
         {view === "settings" && <SettingsView state={state} load={load} action={action} />}

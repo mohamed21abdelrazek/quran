@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   ChevronLeft,
   ChevronRight,
@@ -29,8 +28,9 @@ import {
   BookmarkCheck,
   Sparkles,
 } from "lucide-react"
-import { SURAHS, TOTAL_PAGES, pageToJuz } from "@/lib/quran"
-import { pagesLabel } from "@/lib/quran"
+import { SURAHS, TOTAL_PAGES, pageToJuz, pagesLabel } from "@/lib/quran"
+import { BISMILLAH, getPagePayload } from "@/lib/mushaf-data"
+import type { AyahRef } from "@/lib/mushaf-data"
 import type { AppState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -40,37 +40,6 @@ export interface WirdTarget {
   from: number
   to: number
   label: string
-}
-
-interface AyahRef {
-  key: string
-  s: number
-  n: number
-  page: number
-  text: string
-  surah: string
-}
-interface GroupOut {
-  id: number
-  identical: boolean
-  items: AyahRef[]
-}
-interface SectionOut {
-  s: number
-  name: string
-  type: string
-  fromAyah: number
-  toAyah: number
-  startsHere: boolean
-  showBismillah: boolean
-}
-interface PageData {
-  page: number
-  juz: number
-  surahLabel: string
-  sections: SectionOut[]
-  ayahs: { key: string; s: number; n: number; text: string; groups: number[] }[]
-  mutashabihat: GroupOut[]
 }
 
 interface ViewProps {
@@ -85,8 +54,6 @@ const AR_DIGITS = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"]
 function arNum(n: number): string {
   return String(n).split("").map((d) => AR_DIGITS[Number(d)] ?? d).join("")
 }
-
-const BISMILLAH = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ"
 
 /** تطبيع كلمة للمقارنة (بلا تشكيل) */
 function plainWord(w: string): string {
@@ -133,42 +100,22 @@ function diffWords(focusText: string, otherText: string): { w: string; diff: boo
 
 // ==================== المكوّن ====================
 
+// استمرارية بين إعادة التركيب: آخر صفحة وآخر حجم خط زارهما المستخدم
+let lastPageVisited = 1
+let lastFontScale = 1
+
 export function MushafView({ state, wird, onCloseWird }: ViewProps) {
-  const [page, setPage] = useState<number>(wird?.from ?? 1)
-  const [data, setData] = useState<PageData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [failed, setFailed] = useState(false)
+  const [page, setPage] = useState<number>(wird?.from ?? lastPageVisited)
   const [focusKey, setFocusKey] = useState<string | null>(null)
-  const [fontScale, setFontScale] = useState(1)
+  const [fontScale, setFontScale] = useState(lastFontScale)
   const topRef = useRef<HTMLDivElement>(null)
 
-  // عند فتح وِرد جديد: انتقل لبدايته مباشرة
-  useEffect(() => {
-    if (wird) setPage(wird.from)
-  }, [wird])
+  // المصحف كامل داخل التطبيق — بلا أي طلب شبكة، يعمل أوفلاين
+  const data = getPagePayload(page)
 
-  const load = useCallback(async (n: number) => {
-    setLoading(true)
-    setFailed(false)
-    try {
-      const res = await fetch(`/api/mushaf/page?n=${n}`, { cache: "no-store" })
-      if (!res.ok) throw new Error()
-      const json = (await res.json()) as PageData
-      setData(json)
-    } catch {
-      setFailed(true)
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  // تمرير سلس لبداية القارئ عند تغيير الصفحة + تذكر آخر موضع
   useEffect(() => {
-    load(page)
-  }, [page, load])
-
-  // تمرير سلس لبداية القارئ عند تغيير الصفحة
-  useEffect(() => {
+    lastPageVisited = page
     topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
   }, [page])
 
@@ -205,12 +152,18 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
     return { ayah, groups }
   }, [data, focusKey])
 
+  if (!data) return null
+
   const jumpTo = (p: number) => {
     setFocusKey(null)
     if (p !== page) setPage(p)
   }
 
   const fontClass = fontScale === 3 ? "text-2xl sm:text-[1.7rem]" : fontScale === 2 ? "text-xl sm:text-2xl" : "text-lg sm:text-xl"
+  const applyFontScale = (f: number) => {
+    lastFontScale = f
+    setFontScale(f)
+  }
 
   return (
     <div className="space-y-4">
@@ -329,7 +282,7 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
                     type="button"
                     className="px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                     disabled={fontScale <= 1}
-                    onClick={() => setFontScale((f) => Math.max(1, f - 1))}
+                    onClick={() => applyFontScale(Math.max(1, fontScale - 1))}
                     aria-label="تصغير الخط"
                   >
                     <Minus className="h-4 w-4" />
@@ -339,7 +292,7 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
                     type="button"
                     className="px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                     disabled={fontScale >= 3}
-                    onClick={() => setFontScale((f) => Math.min(3, f + 1))}
+                    onClick={() => applyFontScale(Math.min(3, fontScale + 1))}
                     aria-label="تكبير الخط"
                   >
                     <Plus className="h-4 w-4" />
@@ -379,38 +332,8 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
         </Card>
       </div>
 
-      {/* صفحة المصحف */}
-      {loading && (
-        <Card className="border-border/60">
-          <CardContent className="space-y-4 p-6">
-            <Skeleton className="mx-auto h-7 w-48" />
-            <Skeleton className="mx-auto h-5 w-64" />
-            <div className="space-y-3 pt-4">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-[92%]" />
-              <Skeleton className="h-4 w-[97%]" />
-              <Skeleton className="h-4 w-[85%]" />
-              <Skeleton className="h-4 w-[95%]" />
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {failed && (
-        <Card className="border-rose-300/70 bg-rose-50/70 dark:border-rose-700/40 dark:bg-rose-950/25">
-          <CardContent className="p-5 text-center">
-            <p className="text-sm font-bold text-rose-800 dark:text-rose-200">
-              تعذر تحميل الصفحة — تحقق من الاتصال ثم أعد المحاولة.
-            </p>
-            <Button size="sm" variant="outline" className="mt-3" onClick={() => load(page)}>
-              إعادة المحاولة
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {!loading && !failed && data && (
-        <Card
+      {/* صفحة المصحف — من البيانات المحلية مباشرة */}
+      <Card
           className={cn(
             "animate-in fade-in-50 overflow-hidden border-2 shadow-md",
             wird && page >= wird.from && page <= wird.to
@@ -530,7 +453,6 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
             </div>
           </CardContent>
         </Card>
-      )}
 
       {/* تلميح استخدام */}
       {!wird && (

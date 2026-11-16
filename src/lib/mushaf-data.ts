@@ -76,8 +76,13 @@ export interface PagePayload {
   mutashabihat: GroupOut[]
 }
 
+// كاش النتائج — قلب الصفحة فوري دائماً (يعمل أوفلاين بالكامل)
+const payloadCache = new Map<number, PagePayload>()
+
 export function getPagePayload(n: number): PagePayload | null {
   if (n < 1 || n > raw.pages.length) return null
+  const hit = payloadCache.get(n)
+  if (hit) return hit
   const pg = raw.pages[n - 1]
   const juz = pageToJuz(n)
 
@@ -122,5 +127,7 @@ export function getPagePayload(n: number): PagePayload | null {
 
   const surahLabel = sections.map((s) => s.name).join("، ")
 
-  return { page: n, juz, surahLabel, sections, ayahs, mutashabihat }
+  const payload: PagePayload = { page: n, juz, surahLabel, sections, ayahs, mutashabihat }
+  payloadCache.set(n, payload)
+  return payload
 }

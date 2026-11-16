@@ -47,9 +47,10 @@ interface ViewProps {
   load: () => Promise<void>
   action: (url: string, body: unknown) => Promise<Record<string, unknown>>
   openWird: (from: number, to: number, label: string) => void
+  patchTask: (taskId: number, status: "done" | "snoozed", quality?: TaskDTO["quality"]) => void
 }
 
-export function DashboardView({ state, load, action, openWird }: ViewProps) {
+export function DashboardView({ state, load, action, openWird, patchTask }: ViewProps) {
   const { toast } = useToast()
   const [busyTask, setBusyTask] = useState<number | null>(null)
   const [applyingCapacity, setApplyingCapacity] = useState(false)
@@ -82,6 +83,15 @@ export function DashboardView({ state, load, action, openWird }: ViewProps) {
     setBusyTask(task.id)
     try {
       const res = await action("/api/task", { taskId: task.id, action: "complete", quality })
+      if (res.queued) {
+        // أوفلاين: نثبّتها محلياً وترسل تلقائياً عند عودة الاتصال
+        patchTask(task.id, "done", quality)
+        toast({
+          title: "حُفظت أوفلاين",
+          description: "سُجلت مراجعتك وستُرسل تلقائياً فور عودة الاتصال",
+        })
+        return
+      }
       if (res.allDone) {
         fireConfetti()
         toast({
@@ -107,7 +117,12 @@ export function DashboardView({ state, load, action, openWird }: ViewProps) {
   const snooze = async (task: TaskDTO) => {
     setBusyTask(task.id)
     try {
-      await action("/api/task", { taskId: task.id, action: "snooze" })
+      const res = await action("/api/task", { taskId: task.id, action: "snooze" })
+      if (res.queued) {
+        patchTask(task.id, "snoozed")
+        toast({ title: "حُفظت أوفلاين", description: "التأجيل سيُرسل تلقائياً فور عودة الاتصال" })
+        return
+      }
       toast({ title: "أجّلناها إلى الغد", description: "ستكون أول ما يظهر في ورد الغد إن شاء الله" })
       await load()
     } catch (e) {
@@ -119,7 +134,11 @@ export function DashboardView({ state, load, action, openWird }: ViewProps) {
 
   const cannotToday = async () => {
     try {
-      await action("/api/day", { action: "cannot" })
+      const res = await action("/api/day", { action: "cannot" })
+      if (res.queued) {
+        toast({ title: "حُفظت أوفلاين", description: "سيُنفذ النقل تلقائياً فور عودة الاتصال" })
+        return
+      }
       toast({
         title: "لا مشكلة أبداً",
         description: "أعدنا جدولة ورد اليوم ليوم غد، وسنوازن خطتك تلقائياً بما يناسبك",
@@ -133,7 +152,11 @@ export function DashboardView({ state, load, action, openWird }: ViewProps) {
   const applySuggestedCapacity = async () => {
     setApplyingCapacity(true)
     try {
-      await action("/api/settings", { dailyCapacity: state.cycle.requiredDaily })
+      const res = await action("/api/settings", { dailyCapacity: state.cycle.requiredDaily })
+      if (res.queued) {
+        toast({ title: "حُفظت أوفلاين", description: "سيُطبق الضبط تلقائياً فور عودة الاتصال" })
+        return
+      }
       toast({
         title: "تم ضبط سعتك",
         description: `أصبح وردك ${state.cycle.requiredDaily} صفحة يومياً — تكمل كل حفظك كل ${formatDays(state.cycle.targetDays)} بإذن الله`,

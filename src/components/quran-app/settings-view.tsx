@@ -104,7 +104,7 @@ export function SettingsView({
   const save = async () => {
     setSaving(true)
     try {
-      await action("/api/settings", {
+      const res = await action("/api/settings", {
         name: name.trim(),
         dailyCapacity: capacity,
         unitSize,
@@ -113,6 +113,11 @@ export function SettingsView({
         autoAdjust,
         timezone,
       })
+      if (res.queued) {
+        toast({ title: "حُفظت أوفلاين", description: "ستُطبق إعداداتك تلقائياً فور عودة الاتصال" })
+        setDirty(false)
+        return
+      }
       toast({ title: "تم الحفظ", description: "ستُطبق إعداداتك الجديدة على خطط الأيام القادمة" })
       setDirty(false)
       await load()
@@ -143,7 +148,12 @@ export function SettingsView({
         setEditOpen(false)
         return
       }
-      await action("/api/ranges", { add: pagesToRanges(added), remove: pagesToRanges(removed) })
+      const res = await action("/api/ranges", { add: pagesToRanges(added), remove: pagesToRanges(removed) })
+      if (res.queued) {
+        toast({ title: "حُفظت أوفلاين", description: "سيُحدَّث حفظك تلقائياً فور عودة الاتصال" })
+        setEditOpen(false)
+        return
+      }
       toast({
         title: "تم تحديث حفظك",
         description: `${added.length > 0 ? `أضفنا ${formatPages(added.length)}` : ""}${added.length > 0 && removed.length > 0 ? " و" : ""}${removed.length > 0 ? `أزلنا ${formatPages(removed.length)}` : ""} — وستتكيف خطتك فوراً`,
@@ -159,7 +169,11 @@ export function SettingsView({
 
   const reset = async () => {
     try {
-      await action("/api/reset", {})
+      const res = await action("/api/reset", {})
+      if (res.queued) {
+        toast({ title: "حُفظت أوفلاين", description: "سيُنفَّذ الضبط تلقائياً فور عودة الاتصال" })
+        return
+      }
       toast({ title: "تمت إعادة الضبط", description: "سنبدأ من جديد — حدد حفظك من جديد" })
       await load()
     } catch (e) {
