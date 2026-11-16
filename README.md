@@ -105,7 +105,7 @@ bun run dev            # http://localhost:3000
 توجد نسخة أندرويد كاملة من وِردي تعمل **بدون إنترنت إطلاقاً**: نفس المحرك والخطة والمصحف والمتشابهات والتفسير، لكن البيانات كلها داخل التطبيق (بلا خادم) — تقدمك يُحفظ في جهازك مباشرة.
 
 - **التحميل**: حمّل `wirdi-offline-v*.apk` من [صفحة الإصدارات](https://github.com/mohamed21abdelrazek/quran/releases) وثبّته على هاتفك.
-- **البناء محلياً**: `bash scripts/build-offline.sh` ثم `bash android-shell/build-apk.sh` (يتطلب Java 17 و Android SDK).
+- **البناء محلياً**: `bash scripts/build-offline.sh` ثم `bash android-shell/build-apk.sh` (يتطلب Java 21 و Android SDK).
 - **كيف تعمل؟** المعمارية نفسها للموقع والتطبيق؛ عند بناء الأوفلاين (`WARDI_OFFLINE=1`) تُستبدل وحدتان فقط:
   - `@/lib/db` ← `db-offline.ts`: نفس واجهة Prisma لكن فوق `localStorage` في جهازك.
   - `@/lib/client-backend/entry` ← `offline.ts`: نداءات محلية بدل طلبات HTTP.

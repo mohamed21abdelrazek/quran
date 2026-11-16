@@ -2,7 +2,7 @@
 # بناء APK أندرويد لنسخة وِردي الأوفلاين.
 # المتطلبات المسبقة:
 #   1) out/ موجوداً — ناتج scripts/build-offline.sh (من جذر المستودع)
-#   2) JAVA 17 + Android SDK (ANDROID_HOME)
+#   2) JAVA 21 + Android SDK (ANDROID_HOME)
 # الناتج: android-shell/dist/wirdi-offline.apk
 set -euo pipefail
 cd "$(dirname "$0")"
