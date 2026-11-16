@@ -8,7 +8,7 @@ interface SurahMeta { n: number; name: string; type: string; ayahCount: number; 
 interface RawData { pages: PageRow[]; surahs: SurahMeta[]; juzStart: number[] }
 const raw = quranData as unknown as RawData
 
-interface MtGroup { i: number; x: number; r: string[] }
+interface MtGroup { i: number; x: number; r: string[]; c?: number }
 const mtRaw = mtsData as unknown as { groups: MtGroup[] }
 
 export interface AyahRef {
@@ -33,6 +33,10 @@ for (const pg of raw.pages) {
 export interface GroupOut {
   id: number
   identical: boolean
+  /** من خبرة الحفّاظ — مجموعة منسّقة يدوياً (القارئ إدريس العاصم) */
+  curated: boolean
+  /** إشارة «سياق»: إظهار تكملة ما بعد المقطع للتمييز */
+  ctx: boolean
   items: AyahRef[]
 }
 const groupById = new Map<number, GroupOut>()
@@ -46,7 +50,7 @@ for (const g of mtRaw.groups) {
     items.push({ key, s: a.s, n: a.n, page: a.page, text: a.text, surah: meta?.name ?? "" })
   }
   if (items.length < 2) continue
-  const out: GroupOut = { id: g.i, identical: g.x === 1, items }
+  const out: GroupOut = { id: g.i, identical: g.x === 1, curated: g.x === 2, ctx: g.c === 1, items }
   groupById.set(g.i, out)
   for (const it of items) {
     const list = groupIdsByAyah.get(it.key) ?? []
@@ -56,6 +60,16 @@ for (const g of mtRaw.groups) {
 }
 
 export const BISMILLAH = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ"
+
+/** نص الآية التالية مباشرة (لمواصلة السياق) — أو التالية في السورة القادمة */
+export function getNextAyahText(key: string): string | null {
+  const a = ayahByKey.get(key)
+  if (!a) return null
+  const same = ayahByKey.get(`${a.s}:${a.n + 1}`)
+  if (same) return same.text
+  const nextSurah = ayahByKey.get(`${a.s + 1}:1`)
+  return nextSurah ? nextSurah.text : null
+}
 
 export interface SectionOut {
   s: number

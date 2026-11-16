@@ -1,7 +1,32 @@
 /* عامل الخدمة — وِردي يعمل أوفلاين بالكامل:
    المصحف والمتشابهات بيانات محلية في التطبيق أصلاً؛
-   هنا نؤمّن هيكل التطبيق والصفحة والخطوط وآخر لقطة حالة. */
-const CACHE = "wardi-v1"
+   الخطوط محلية في /fonts؛ والتلاوات تُخزَّن بعد أول تشغيل. */
+const CACHE = "wardi-v2"
+
+const FONTS = [
+  "/fonts/amiri-arabic-400.woff2",
+  "/fonts/amiri-arabic-400i.woff2",
+  "/fonts/amiri-arabic-700.woff2",
+  "/fonts/amiri-latin-400.woff2",
+  "/fonts/amiri-latin-400i.woff2",
+  "/fonts/amiri-latin-700.woff2",
+  "/fonts/amiri-latin-ext-400.woff2",
+  "/fonts/amiri-latin-ext-400i.woff2",
+  "/fonts/amiri-latin-ext-700.woff2",
+  "/fonts/amiriquran-arabic-400.woff2",
+  "/fonts/amiriquran-latin-400.woff2",
+  "/fonts/tajawal-arabic-300.woff2",
+  "/fonts/tajawal-arabic-400.woff2",
+  "/fonts/tajawal-arabic-500.woff2",
+  "/fonts/tajawal-arabic-700.woff2",
+  "/fonts/tajawal-arabic-800.woff2",
+  "/fonts/tajawal-latin-300.woff2",
+  "/fonts/tajawal-latin-400.woff2",
+  "/fonts/tajawal-latin-500.woff2",
+  "/fonts/tajawal-latin-700.woff2",
+  "/fonts/tajawal-latin-800.woff2",
+]
+
 const CORE = [
   "/",
   "/manifest.webmanifest",
@@ -9,6 +34,8 @@ const CORE = [
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/icon-maskable-512.png",
+  "/icons/apple-touch-icon.png",
+  ...FONTS,
 ]
 
 self.addEventListener("install", (event) => {
@@ -32,7 +59,7 @@ self.addEventListener("activate", (event) => {
   )
 })
 
-/** خطوط جوجل وثوابت أخرى: الكاش أولاً */
+/** كاش أولاً — للخطوط والتلاوات المحفوظة مسبقاً */
 async function cacheFirst(req) {
   const cache = await caches.open(CACHE)
   const hit = await cache.match(req)
@@ -63,13 +90,25 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url)
 
-  // خطوط جوجل (أوفلاين بلا فقدان الخط القرآني)
-  if (url.origin !== self.location.origin) {
-    if (url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com") {
-      event.respondWith(cacheFirst(req))
-    }
+  // تلاوات everyayah: كاش دائم — أول تشغيل يحتاج اتصالاً ثم يعمل أوفلاين
+  // نتجاهل ترويسة Range ونطلب الملف كاملاً — يُخزَّن دائماً استجابة 200 كاملة
+  if (url.hostname === "everyayah.com") {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE)
+        const bare = new Request(url.href, { method: "GET" })
+        const hit = await cache.match(bare)
+        if (hit) return hit
+        const res = await fetch(bare)
+        if (res && res.status === 200) cache.put(bare, res.clone())
+        return res
+      })()
+    )
     return
   }
+
+  // خارج النطاق وغير ذلك: نتركه للمتصفح
+  if (url.origin !== self.location.origin) return
 
   // حالات API: دائماً من الشبكة — الطزاجة أساس؛
   // عند الانقطاع يعرض التطبيق لقطة localStorage ويضع الإجراء في قائمة الانتظار
@@ -92,6 +131,6 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  // بقية الموارد (حزم JS/CSS/أيقونات): شبكة أولاً + تراجع للكاش
+  // بقية الموارد (حزم JS/CSS/الخطوط/الأيقونات): شبكة أولاً + تراجع للكاش
   event.respondWith(networkFirst(req))
 })
