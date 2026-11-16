@@ -9,6 +9,7 @@ import { fireConfetti } from "@/hooks/use-app"
 import type { AppState, TaskDTO } from "@/lib/types"
 import type { Quality } from "@/lib/content"
 import { dateAr, formatDays, formatPages, weekdayShortAr } from "@/lib/format"
+import { TOTAL_PAGES, pagesLabel, surahsInRange } from "@/lib/quran"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -146,6 +147,36 @@ export function DashboardView({ state, load, action, openWird, patchTask }: View
       await load()
     } catch (e) {
       toast({ title: "خطأ", description: e instanceof Error ? e.message : "حاول مرة أخرى" })
+    }
+  }
+
+  // أول صفحة غير محفوظة — مرشّح «حفظ جديد اليوم»
+  const firstNewPage = useMemo(() => {
+    const st = state.memorized.strengths
+    for (let p = 1; p <= TOTAL_PAGES; p++) {
+      if (st[p - 1] < 0) return p
+    }
+    return null
+  }, [state.memorized.strengths])
+
+  const [savingNew, setSavingNew] = useState(false)
+
+  /** تسجيل صفحة حفظ جديدة — تدخل خطة المراجعة من الغد */
+  const memorizeNewToday = async () => {
+    if (!firstNewPage) return
+    setSavingNew(true)
+    try {
+      await action("/api/ranges", { add: [{ from: firstNewPage, to: firstNewPage }], remove: [] })
+      toast({
+        title: "بارك الله فيك",
+        description: `سُجّلت صفحة ${firstNewPage} حفظاً جديداً — ستدخل خطة مراجعتك تلقائياً`,
+      })
+      await load()
+      openWird(firstNewPage, firstNewPage, `حفظ جديد — ${pagesLabel(firstNewPage, firstNewPage)}`)
+    } catch (e) {
+      toast({ title: "خطأ", description: e instanceof Error ? e.message : "حاول مرة أخرى" })
+    } finally {
+      setSavingNew(false)
     }
   }
 
@@ -425,6 +456,40 @@ export function DashboardView({ state, load, action, openWird, patchTask }: View
           </AlertDialog>
         )}
       </section>
+
+      {/* حفظ جديد اليوم — سنّة الحفّاظ: صفحة جديدة كل يوم */}
+      {firstNewPage && (
+        <section aria-label="حفظ جديد اليوم" className="space-y-3">
+          <Card className="animate-in fade-in-50 border-teal-300/70 bg-teal-50/70 dark:border-teal-700/40 dark:bg-teal-950/30">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-600/15 text-teal-700 dark:text-teal-300">
+                  <Sparkles className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-extrabold">حفظ جديد اليوم — صفحة {firstNewPage}</p>
+                  <p className="truncate text-[11px] leading-5 text-muted-foreground">
+                    {pagesLabel(firstNewPage, firstNewPage)} • {surahsInRange(firstNewPage, firstNewPage).slice(0, 3).join("، ")}
+                    {" — أول صفحة لم تُسجّل حفظاً بعد"}
+                  </p>
+                  <p className="text-[11px] leading-5 text-muted-foreground/80">
+                    سُنّة الحفّاظ: وِرد ثابت + صفحة حفظ جديدة — سجّلها وستدخل مراجعتك من الغد إن شاء الله.
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                className="h-9 shrink-0 gap-1.5 bg-teal-700 hover:bg-teal-800"
+                onClick={memorizeNewToday}
+                disabled={savingNew}
+              >
+                {savingNew ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpen className="h-4 w-4" />}
+                حفظتها اليوم
+              </Button>
+            </CardContent>
+          </Card>
+        </section>
+      )}
 
       {/* الصفحات المحتاجة مراجعة — تركيز على الأضعف */}
       {state.cycle.memorizedTotal > 0 && (

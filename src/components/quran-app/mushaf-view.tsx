@@ -35,10 +35,17 @@ import {
   ScrollText,
   MoonStar,
   GraduationCap,
+  Bookmark,
+  BookMarked,
+  BookOpenText,
+  Landmark,
+  Tag,
+  AlertTriangle,
 } from "lucide-react"
 import { SURAHS, TOTAL_PAGES, pageToJuz, pagesLabel } from "@/lib/quran"
 import { BISMILLAH, getNextAyahText, getPagePayload } from "@/lib/mushaf-data"
 import type { AyahRef } from "@/lib/mushaf-data"
+import { getTafsir, getAsbab } from "@/lib/tafsir"
 import type { AppState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useAyahAudio } from "@/hooks/use-ayah-audio"
@@ -51,12 +58,16 @@ export interface WirdTarget {
   from: number
   to: number
   label: string
+  /** زيارة صفحة بلا وِرد — من قسم اختبرني */
+  visit?: boolean
 }
 
 interface ViewProps {
   state: AppState
   wird: WirdTarget | null
   onCloseWird: () => void
+  /** إجراء مع قائمة انتظار أوفلاين — للعلامات المرجعية والكلمات الصعبة */
+  action: (url: string, body: unknown) => Promise<Record<string, unknown>>
 }
 
 // ==================== أدوات ====================
@@ -225,18 +236,54 @@ const MODES: Record<
 let lastPageVisited = 1
 let lastFontScale = 1
 
-export function MushafView({ state, wird, onCloseWird }: ViewProps) {
+export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
   const [page, setPage] = useState<number>(wird?.from ?? lastPageVisited)
   const [focusKey, setFocusKey] = useState<string | null>(null)
   const [fontScale, setFontScale] = useState(lastFontScale)
   const [mode, setMode] = useState<ReadingMode>("light")
+  // بطاقة الآية: التفسير وأسباب النزول وتعليم الكلمات الصعبة
+  const [cardKey, setCardKey] = useState<string | null>(null)
+  const [cardData, setCardData] = useState<
+    { tafsir: string | null; asbab: string[] | null; loading: boolean } | null
+  >(null)
+  // العلامات المرجعية — نسخة محلية تُحدّث تفاؤلياً
+  const [bookmarks, setBookmarks] = useState<number[]>([])
+  const [markBusy, setMarkBusy] = useState(false)
+  // كلمات أُضيفت للقائمة الصعبة في هذه الجلسة (عرض فوري)
+  const [addedHard, setAddedHard] = useState<Set<string>>(new Set())
+
+  // المصحف كامل داخل التطبيق — بلا أي طلب شبكة، يعمل أوفلاين
+  // (قبل كل التأثيرات: تقييم مصفوفات الاعتماديات في نفس الاستدعاء)
+  const data = getPagePayload(page)
+
   const topRef = useRef<HTMLDivElement>(null)
   const restoredRef = useRef(false)
   const audio = useAyahAudio()
   const { toast } = useToast()
 
-  // المصحف كامل داخل التطبيق — بلا أي طلب شبكة، يعمل أوفلاين
-  const data = getPagePayload(page)
+  // مزامنة العلامات والصعبة من حالة التطبيق
+  useEffect(() => {
+    setBookmarks(state.tools?.bookmarks ?? [])
+  }, [state.tools?.bookmarks])
+
+  useEffect(() => {
+    setAddedHard(new Set((state.tools?.difficult ?? []).map((d) => `${d.key}:${d.word}`)))
+  }, [state.tools?.difficult])
+
+  // جلب التفسير وأسباب النزول عند فتح بطاقة الآية
+  useEffect(() => {
+    if (!cardKey || !data) return
+    const ayah = data.ayahs.find((a) => a.key === cardKey)
+    if (!ayah) return
+    let cancelled = false
+    setCardData({ tafsir: null, asbab: null, loading: true })
+    Promise.all([getTafsir(ayah.s, ayah.n), getAsbab(ayah.s, ayah.n)]).then(([t, ab]) => {
+      if (!cancelled) setCardData({ tafsir: t, asbab: ab, loading: false })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [cardKey, data])
 
   // استرجاع التفضيلات + آخر موضع قراءة — إطاراً واحداً بعد التركيب
   // (نداء من نظام خارجي: بلا تعارض hydration ولا setState متزامن داخل التأثير)
@@ -326,6 +373,50 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
     if (p !== page) setPage(p)
   }
 
+  /** تبديل علامة مرجعية للصفحة الحالية — تحديث تفاؤلي فوري */
+  const toggleMark = async () => {
+    if (markBusy) return
+    setMarkBusy(true)
+    const marked = bookmarks.includes(page)
+    // تفاؤلي: أعد القائمة فوراً، وتراجع عند الفشل
+    setBookmarks((prev) => (marked ? prev.filter((p) => p !== page) : [...prev, page].sort((a, b) => a - b)))
+    try {
+      const res = await action("/api/bookmarks", { page })
+      if (res.queued) {
+        toast({ title: "حُفظت أوفلاين", description: "العلامة ستُرسل تلقائياً فور عودة الاتصال" })
+      } else {
+        toast({
+          title: marked ? "أزلنا العلامة" : "أُضيفت علامة",
+          description: marked ? `صفحة ${arNum(page)} بلا علامة الآن` : `صارت صفحة ${arNum(page)} ضمن علاماتك`,
+        })
+      }
+    } catch {
+      setBookmarks((prev) => (marked ? [...prev, page].sort((a, b) => a - b) : prev.filter((p) => p !== page)))
+      toast({ title: "تعذر حفظ العلامة", variant: "destructive" })
+    } finally {
+      setMarkBusy(false)
+    }
+  }
+
+  /** تعليم كلمة داخل آية كصعبة — من بطاقة الآية */
+  const markWord = async (key: string, word: string, s: number, n: number, pg: number) => {
+    if (addedHard.has(`${key}:${word}`)) return
+    setAddedHard((prev) => new Set(prev).add(`${key}:${word}`))
+    try {
+      const res = await action("/api/difficult", { action: "add", key, word, surah: s, ayah: n, page: pg })
+      if (!res.queued) {
+        toast({ title: "أُضيفت للقائمة الصعبة", description: "ستراها في تبويب «اختبرني» لمراجعتها" })
+      }
+    } catch {
+      setAddedHard((prev) => {
+        const nx = new Set(prev)
+        nx.delete(`${key}:${word}`)
+        return nx
+      })
+      toast({ title: "تعذر الحفظ", variant: "destructive" })
+    }
+  }
+
   const fontClass = fontScale === 3 ? "text-2xl sm:text-[1.7rem]" : fontScale === 2 ? "text-xl sm:text-2xl" : "text-lg sm:text-xl"
   const applyFontScale = (f: number) => {
     lastFontScale = f
@@ -352,7 +443,7 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
                   <BookOpen className="h-5 w-5" />
                 </span>
                 <div>
-                  <p className="text-sm font-extrabold">وِرد اليوم — {wird.label}</p>
+                  <p className="text-sm font-extrabold">{wird.visit ? "مراجعة سريعة" : "وِرد اليوم"} — {wird.label}</p>
                   <p className="text-[11px] text-white/75">أنت الآن في صفحة {arNum(page)} من {arNum(TOTAL_PAGES)}</p>
                 </div>
               </div>
@@ -473,6 +564,18 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className={cn("h-9 w-9 shrink-0", bookmarks.includes(page) && "border-primary/50 text-primary")}
+                  onClick={toggleMark}
+                  disabled={markBusy}
+                  aria-pressed={bookmarks.includes(page)}
+                  aria-label={bookmarks.includes(page) ? "إزالة علامة هذه الصفحة" : "وضع علامة على هذه الصفحة"}
+                  title={bookmarks.includes(page) ? "إزالة علامة الصفحة" : "علّم هذه الصفحة"}
+                >
+                  <Bookmark className={cn("h-5 w-5", bookmarks.includes(page) && "fill-primary text-primary")} />
+                </Button>
                 <Select
                   value={String(page)}
                   onValueChange={(v) => setPage(Number(v))}
@@ -503,6 +606,34 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
                 aria-label="شريط التنقل بين صفحات المصحف"
               />
             </div>
+
+            {/* علاماتي المرجعية */}
+            {bookmarks.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-2.5" dir="rtl">
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-muted-foreground">
+                  <BookMarked className="h-3.5 w-3.5" />
+                  علاماتي:
+                </span>
+                <div className="scroll-thin flex max-w-full flex-wrap gap-1.5">
+                  {bookmarks.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setPage(p)}
+                      className={cn(
+                        "min-w-8 rounded-md border px-2 py-0.5 text-[11px] font-extrabold tabular-nums transition-all",
+                        p === page
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border/70 bg-muted/60 text-foreground hover:border-primary/50 hover:text-primary",
+                      )}
+                      title={`اذهب إلى صفحة ${p}`}
+                    >
+                      {arNum(p)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* التلاوة + نمط القراءة */}
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border/60 pt-3">
@@ -630,7 +761,17 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
                           key={a.key}
                           className={cn(isPlaying && ["rounded-lg px-1 transition-colors", MODES[mode].playing])}
                         >
-                          {a.text}{" "}
+                          <button
+                            type="button"
+                            onClick={() => setCardKey(a.key)}
+                            className={cn(
+                              "font-quran cursor-pointer underline decoration-gold/50 decoration-dotted underline-offset-8 transition-colors hover:decoration-gold",
+                              MODES[mode].body,
+                            )}
+                            title="بطاقة الآية: التفسير وأسباب النزول والكلمات الصعبة"
+                          >
+                            {a.text}
+                          </button>{" "}
                           <span
                             className={cn(
                               "mx-0.5 inline-flex h-6 w-6 translate-y-0.5 items-center justify-center rounded-full align-middle text-[11px] font-bold tabular-nums",
@@ -740,9 +881,9 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
 
       {/* تلميح استخدام */}
       {!wird && (
-        <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-muted-foreground">
-          <MousePointerClick className="h-3.5 w-3.5" />
-          استخدم الأسهم يميناً ويساراً للتنقل — وزر «متشابهات» بجوار كل آية يعرض نظائرها مع إبراز الفرق
+        <p className="flex items-center justify-center gap-1.5 text-center text-[11px] leading-5 text-muted-foreground">
+          <MousePointerClick className="h-3.5 w-3.5 shrink-0" />
+          استخدم الأسهم للتنقل — اضغط على آية لتفسيرها وأسباب نزولها، وزر «متشابهات» يعرض نظائرها مع إبراز الفرق
         </p>
       )}
 
@@ -961,6 +1102,132 @@ export function MushafView({ state, wird, onCloseWird }: ViewProps) {
               </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* بطاقة الآية: تفسير + أسباب نزول + كلمات صعبة */}
+      <Dialog open={!!cardKey} onOpenChange={(o) => !o && setCardKey(null)}>
+        <DialogContent className="max-h-[88vh] sm:max-w-2xl" dir="rtl">
+          {(() => {
+            const ayah = data.ayahs.find((a) => a.key === cardKey)
+            if (!ayah) return null
+            const words = ayah.text.split(/\s+/).filter(Boolean)
+            const gCount = ayah.groups.length
+            return (
+              <>
+                <DialogHeader className="text-right">
+                  <DialogTitle className="flex flex-wrap items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                      <BookOpenText className="h-4 w-4" />
+                    </span>
+                    {surahName(ayah.s)} {arNum(ayah.n)}
+                    <span className="text-xs font-medium text-muted-foreground">(ص {arNum(page)})</span>
+                  </DialogTitle>
+                  <DialogDescription className="text-right">
+                    التفسير الميسّر وأسباب النزول — واضغط أي كلمة صعبة لتعليمها في قائمتك.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="scroll-thin space-y-4 overflow-y-auto pl-1" dir="rtl">
+                  {/* نص الآية */}
+                  <blockquote className="rounded-xl border border-gold/40 bg-primary/5 p-3">
+                    <p className="font-quran text-right text-xl leading-[2.2] text-foreground">{ayah.text}</p>
+                  </blockquote>
+
+                  {/* التفسير الميسّر */}
+                  <div className="rounded-xl border border-border/70 bg-muted/40 p-3">
+                    <p className="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold text-primary">
+                      <BookOpenText className="h-4 w-4" />
+                      التفسير الميسّر
+                    </p>
+                    {cardData?.loading ? (
+                      <div className="space-y-2">
+                        <div className="h-3 w-full animate-pulse rounded bg-muted" />
+                        <div className="h-3 w-11/12 animate-pulse rounded bg-muted" />
+                        <div className="h-3 w-4/5 animate-pulse rounded bg-muted" />
+                      </div>
+                    ) : cardData?.tafsir ? (
+                      <p className="text-sm leading-7 text-foreground">{cardData.tafsir}</p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">لا يوجد تفسير مُسجّل لهذه الآية.</p>
+                    )}
+                  </div>
+
+                  {/* أسباب النزول */}
+                  {cardData && !cardData.loading && cardData.asbab && (
+                    <div className="space-y-2.5 rounded-xl border border-teal-300/60 bg-teal-50/50 p-3 dark:border-teal-700/40 dark:bg-teal-950/25">
+                      <p className="flex items-center gap-1.5 text-xs font-extrabold text-teal-800 dark:text-teal-300">
+                        <Landmark className="h-4 w-4" />
+                        أسباب النزول
+                      </p>
+                      {cardData.asbab.map((o, i) => (
+                        <p key={i} className="text-sm leading-7 text-foreground/90">
+                          {o}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* كلمات الآية — تعليم الصعبة */}
+                  <div className="rounded-xl border border-border/70 p-3">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-extrabold text-muted-foreground">
+                      <Tag className="h-4 w-4" />
+                      كلمة صعبة؟ اضغطها لتضيفها لقائمتك
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {words.map((w, wi) => {
+                        const hard = addedHard.has(`${ayah.key}:${w}`)
+                        return (
+                          <button
+                            key={wi}
+                            type="button"
+                            disabled={hard}
+                            onClick={() => markWord(ayah.key, w, ayah.s, ayah.n, page)}
+                            className={cn(
+                              "font-quran rounded-md border px-2 py-1 text-sm transition-all",
+                              hard
+                                ? "border-red-300/70 bg-red-50 text-red-600 line-through dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-400"
+                                : "border-border/70 bg-background hover:border-red-400/60 hover:text-red-600 dark:hover:border-red-500/40",
+                            )}
+                            title={hard ? "معلّمة كصعبة" : "علّمها كصعبة"}
+                          >
+                            {w}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* أزرار */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-1.5"
+                      onClick={() => audio.playAyah({ key: ayah.key, s: ayah.s, n: ayah.n })}
+                    >
+                      {audio.playingKey === ayah.key ? <Square className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5" />}
+                      استمع للآية
+                    </Button>
+                    {gCount > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 gap-1.5"
+                        onClick={() => {
+                          setCardKey(null)
+                          setFocusKey(ayah.key)
+                        }}
+                      >
+                        <Scale className="h-3.5 w-3.5" />
+                        متشابهاتها ({arNum(gCount)})
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </>
+            )
+          })()}
         </DialogContent>
       </Dialog>
     </div>

@@ -96,4 +96,15 @@ export interface AppState {
     perfectDays: number
   }
   badges: { id: string; earned: boolean }[]
+  /** أدوات الحفظ: كلمات صعبة + علامات مرجعية + سجل الاختبار */
+  tools: {
+    difficult: { id: number; key: string; word: string; surah: number; ayah: number; page: number }[]
+    bookmarks: number[]
+    quiz: {
+      recent: { id: number; date: string; kind: string; score: number; correct: number; total: number; detail: string | null }[]
+      totalSessions: number
+      avgScore: number
+      bestScore: number
+    }
+  }
 }

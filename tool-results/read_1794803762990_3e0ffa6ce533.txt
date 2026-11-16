@@ -1,0 +1,823 @@
+     1→// ── Hifz Program Data Models ──
+     2→// All enums and data classes for the memorization framework.
+     3→
+     4→import '../parsing/persisted_data_parser.dart';
+     5→
+     6→// ── Enums ──
+     7→
+     8→/// Age group — affects session length, daily load ceiling, and UI tone.
+     9→enum AgeGroup {
+    10→  child, // 7-12: fastest absorption, short attention span
+    11→  teen, // 13-17: strong memory, moderate attention
+    12→  youngAdult, // 18-30: peak cognitive, can handle aggressive plans
+    13→  adult, // 31-45: good memory, busier schedules
+    14→  middleAged, // 46-55: slower encoding, stronger discipline
+    15→  senior, // 56-70: noticeably slower, shorter sessions
+    16→  elderly, // 71+: fragile retention, very gentle pace
+    17→}
+    18→
+    19→/// Pace preference — how aggressively the user wants to progress.
+    20→enum PacePreference { aggressive, steady, gentle }
+    21→
+    22→/// Prior hifz experience — affects initial plan strategy.
+    23→enum HifzExperience { fresh, resuming, reviewing }
+    24→
+    25→/// How quickly the user encodes new material — from assessment.
+    26→enum EncodingSpeed { fast, moderate, slow }
+    27→
+    28→/// How well the user retains memorized material — from assessment.
+    29→enum RetentionStrength { strong, moderate, fragile }
+    30→
+    31→/// Preferred learning modality — from assessment.
+    32→enum LearningPreference { visual, auditory, kinesthetic, repetition }
+    33→
+    34→/// Goal scope for the hifz plan.
+    35→enum HifzGoal { fullQuran, specificJuz, specificSurahs }
+    36→
+    37→/// Preferred study time of day.
+    38→enum StudyTimeOfDay { fajr, morning, afternoon, evening, night }
+    39→
+    40→/// Status of a single page in the memorization journey.
+    41→enum PageStatus { notStarted, learning, reviewing, memorized }
+    42→
+    43→/// Session phases in the Sabaq-Sabqi-Manzil framework.
+    44→enum SessionPhase { sabaq, sabqi, manzil, flashcards }
+    45→
+    46→/// Self-assessment rating after each phase.
+    47→enum SelfAssessment { strong, okay, needsWork }
+    48→
+    49→/// Source of the reciter (for cross-API compatibility).
+    50→enum ReciterSource { quranDotCom, mp3Quran }
+    51→
+    52→// ── Data Classes ──
+    53→
+    54→/// A user's personalized memorization profile.
+    55→class MemoryProfile {
+    56→  final String id;
+    57→  final String name;
+    58→  final int avatarIndex;
+    59→  final DateTime createdAt;
+    60→  final DateTime? birthday; // NEW: stored, nullable for migration
+    61→  final int _ageFallback; // Legacy age value for old profiles without birthday
+    62→  final AgeGroup ageGroup;
+    63→  final EncodingSpeed encodingSpeed;
+    64→  final RetentionStrength retentionStrength;
+    65→  final LearningPreference learningPreference;
+    66→  final int dailyTimeMinutes;
+    67→  final StudyTimeOfDay preferredTimeOfDay;
+    68→  final HifzGoal goal;
+    69→  final List<int> goalDetails; // Juz numbers or Surah IDs
+    70→  final int defaultReciterId;
+    71→  final ReciterSource defaultReciterSource;
+    72→  final int startingPage;
+    73→  final DateTime startDate;
+    74→  final bool isActive;
+    75→  final List<int> activeDays; // 0=Mon..6=Sun, which days are active
+    76→  final PacePreference pacePreference;
+    77→  final HifzExperience hifzExperience;
+    78→
+    79→  /// Computed age from birthday. Falls back to stored age for legacy profiles.
+    80→  int get age {
+    81→    if (birthday == null) return _ageFallback;
+    82→    final now = DateTime.now();
+    83→    int years = now.year - birthday!.year;
+    84→    if (now.month < birthday!.month ||
+    85→        (now.month == birthday!.month && now.day < birthday!.day)) {
+    86→      years--;
+    87→    }
+    88→    return years.clamp(7, 100);
+    89→  }
+    90→
+    91→  /// Static helper to calculate age from a birthday for use before profile creation.
+    92→  static int calculateAge(DateTime birthday) {
+    93→    final now = DateTime.now();
+    94→    int years = now.year - birthday.year;
+    95→    if (now.month < birthday.month ||
+    96→        (now.month == birthday.month && now.day < birthday.day)) {
+    97→      years--;
+    98→    }
+    99→    return years.clamp(0, 120);
+   100→  }
+   101→
+   102→  const MemoryProfile({
+   103→    required this.id,
+   104→    required this.name,
+   105→    this.avatarIndex = 0,
+   106→    required this.createdAt,
+   107→    this.birthday,
+   108→    int age = 25,
+   109→    this.ageGroup = AgeGroup.youngAdult,
+   110→    this.encodingSpeed = EncodingSpeed.moderate,
+   111→    this.retentionStrength = RetentionStrength.moderate,
+   112→    this.learningPreference = LearningPreference.visual,
+   113→    this.dailyTimeMinutes = 30,
+   114→    this.preferredTimeOfDay = StudyTimeOfDay.fajr,
+   115→    this.goal = HifzGoal.fullQuran,
+   116→    this.goalDetails = const [],
+   117→    this.defaultReciterId = 7,
+   118→    this.defaultReciterSource = ReciterSource.quranDotCom,
+   119→    this.startingPage = 582, // Juz 30 start
+   120→    required this.startDate,
+   121→    this.isActive = true,
+   122→    this.activeDays = const [0, 1, 2, 3, 4, 5, 6], // All days active by default
+   123→    this.pacePreference = PacePreference.steady,
+   124→    this.hifzExperience = HifzExperience.fresh,
+   125→  }) : _ageFallback = age;
+   126→
+   127→  /// Maps an actual age to the appropriate AgeGroup.
+   128→  static AgeGroup ageGroupFromAge(int age) {
+   129→    if (age <= 12) return AgeGroup.child;
+   130→    if (age <= 17) return AgeGroup.teen;
+   131→    if (age <= 30) return AgeGroup.youngAdult;
+   132→    if (age <= 45) return AgeGroup.adult;
+   133→    if (age <= 55) return AgeGroup.middleAged;
+   134→    if (age <= 70) return AgeGroup.senior;
+   135→    return AgeGroup.elderly;
+   136→  }
+   137→
+   138→  MemoryProfile copyWith({
+   139→    String? id,
+   140→    String? name,
+   141→    int? avatarIndex,
+   142→    DateTime? createdAt,
+   143→    DateTime? birthday,
+   144→    bool clearBirthday = false,
+   145→    int? age,
+   146→    AgeGroup? ageGroup,
+   147→    EncodingSpeed? encodingSpeed,
+   148→    RetentionStrength? retentionStrength,
+   149→    LearningPreference? learningPreference,
+   150→    int? dailyTimeMinutes,
+   151→    StudyTimeOfDay? preferredTimeOfDay,
+   152→    HifzGoal? goal,
+   153→    List<int>? goalDetails,
+   154→    int? defaultReciterId,
+   155→    ReciterSource? defaultReciterSource,
+   156→    int? startingPage,
+   157→    DateTime? startDate,
+   158→    bool? isActive,
+   159→    List<int>? activeDays,
+   160→    PacePreference? pacePreference,
+   161→    HifzExperience? hifzExperience,
+   162→  }) {
+   163→    return MemoryProfile(
+   164→      id: id ?? this.id,
+   165→      name: name ?? this.name,
+   166→      avatarIndex: avatarIndex ?? this.avatarIndex,
+   167→      createdAt: createdAt ?? this.createdAt,
+   168→      birthday: clearBirthday ? null : (birthday ?? this.birthday),
+   169→      age: age ?? _ageFallback,
+   170→      ageGroup: ageGroup ?? this.ageGroup,
+   171→      encodingSpeed: encodingSpeed ?? this.encodingSpeed,
+   172→      retentionStrength: retentionStrength ?? this.retentionStrength,
+   173→      learningPreference: learningPreference ?? this.learningPreference,
+   174→      dailyTimeMinutes: dailyTimeMinutes ?? this.dailyTimeMinutes,
+   175→      preferredTimeOfDay: preferredTimeOfDay ?? this.preferredTimeOfDay,
+   176→      goal: goal ?? this.goal,
+   177→      goalDetails: goalDetails ?? this.goalDetails,
+   178→      defaultReciterId: defaultReciterId ?? this.defaultReciterId,
+   179→      defaultReciterSource: defaultReciterSource ?? this.defaultReciterSource,
+   180→      startingPage: startingPage ?? this.startingPage,
+   181→      startDate: startDate ?? this.startDate,
+   182→      isActive: isActive ?? this.isActive,
+   183→      activeDays: activeDays ?? this.activeDays,
+   184→      pacePreference: pacePreference ?? this.pacePreference,
+   185→      hifzExperience: hifzExperience ?? this.hifzExperience,
+   186→    );
+   187→  }
+   188→
+   189→  /// Convert to a Map for SQLite storage.
+   190→  Map<String, dynamic> toMap() => {
+   191→    'id': id,
+   192→    'name': name,
+   193→    'avatarIndex': avatarIndex,
+   194→    'createdAt': createdAt.toIso8601String(),
+   195→    'birthday': birthday?.toIso8601String(),
+   196→    'age': age, // Computed or fallback — kept for backward compat
+   197→    'ageGroup': ageGroup.index,
+   198→    'encodingSpeed': encodingSpeed.index,
+   199→    'retentionStrength': retentionStrength.index,
+   200→    'learningPreference': learningPreference.index,
+   201→    'dailyTimeMinutes': dailyTimeMinutes,
+   202→    'preferredTimeOfDay': preferredTimeOfDay.index,
+   203→    'goal': goal.index,
+   204→    'goalDetails': goalDetails.join(','),
+   205→    'defaultReciterId': defaultReciterId,
+   206→    'defaultReciterSource': defaultReciterSource.index,
+   207→    'startingPage': startingPage,
+   208→    'startDate': startDate.toIso8601String(),
+   209→    'isActive': isActive ? 1 : 0,
+   210→    'activeDays': activeDays.join(','),
+   211→    'pacePreference': pacePreference.index,
+   212→    'hifzExperience': hifzExperience.index,
+   213→  };
+   214→
+   215→  /// Create from a SQLite row.
+   216→  factory MemoryProfile.fromMap(Map<String, dynamic> map) {
+   217→    // Handle backward compatibility: old ageGroup index 2 was 'adult',
+   218→    // in the new 7-value enum index 2 is 'youngAdult' — map old 'adult' (2) to new 'youngAdult' (2)
+   219→    // which is a reasonable default for existing users.
+   220→    return MemoryProfile(
+   221→      id: map['id'] as String,
+   222→      name: map['name'] as String,
+   223→      avatarIndex: PersistedDataParser.intValue(
+   224→        map['avatarIndex'],
+   225→        fallback: 0,
+   226→      ),
+   227→      createdAt: PersistedDataParser.requiredDate(
+   228→        map['createdAt'],
+   229→        field: 'profile.createdAt',
+   230→      ),
+   231→      birthday: PersistedDataParser.nullableDate(map['birthday']),
+   232→      age: PersistedDataParser.intValue(map['age'], fallback: 25),
+   233→      ageGroup: PersistedDataParser.enumValue(
+   234→        AgeGroup.values,
+   235→        map['ageGroup'],
+   236→        fallback: AgeGroup.youngAdult,
+   237→      ),
+   238→      encodingSpeed: PersistedDataParser.enumValue(
+   239→        EncodingSpeed.values,
+   240→        map['encodingSpeed'],
+   241→        fallback: EncodingSpeed.moderate,
+   242→      ),
+   243→      retentionStrength: PersistedDataParser.enumValue(
+   244→        RetentionStrength.values,
+   245→        map['retentionStrength'],
+   246→        fallback: RetentionStrength.moderate,
+   247→      ),
+   248→      learningPreference: PersistedDataParser.enumValue(
+   249→        LearningPreference.values,
+   250→        map['learningPreference'],
+   251→        fallback: LearningPreference.visual,
+   252→      ),
+   253→      dailyTimeMinutes: PersistedDataParser.intValue(
+   254→        map['dailyTimeMinutes'],
+   255→        fallback: 30,
+   256→      ).clamp(5, 480),
+   257→      preferredTimeOfDay: PersistedDataParser.enumValue(
+   258→        StudyTimeOfDay.values,
+   259→        map['preferredTimeOfDay'],
+   260→        fallback: StudyTimeOfDay.fajr,
+   261→      ),
+   262→      goal: PersistedDataParser.enumValue(
+   263→        HifzGoal.values,
+   264→        map['goal'],
+   265→        fallback: HifzGoal.fullQuran,
+   266→      ),
+   267→      goalDetails: PersistedDataParser.intList(
+   268→        map['goalDetails'],
+   269→        minimum: 1,
+   270→        maximum: 114,
+   271→      ),
+   272→      defaultReciterId: PersistedDataParser.intValue(
+   273→        map['defaultReciterId'],
+   274→        fallback: 7,
+   275→      ),
+   276→      defaultReciterSource: PersistedDataParser.enumValue(
+   277→        ReciterSource.values,
+   278→        map['defaultReciterSource'],
+   279→        fallback: ReciterSource.quranDotCom,
+   280→      ),
+   281→      startingPage: PersistedDataParser.intValue(
+   282→        map['startingPage'],
+   283→        fallback: 582,
+   284→      ).clamp(1, 604),
+   285→      startDate: PersistedDataParser.requiredDate(
+   286→        map['startDate'],
+   287→        field: 'profile.startDate',
+   288→      ),
+   289→      isActive: PersistedDataParser.intValue(map['isActive'], fallback: 0) == 1,
+   290→      activeDays: PersistedDataParser.intList(
+   291→        map['activeDays'],
+   292→        minimum: 0,
+   293→        maximum: 6,
+   294→        fallback: const [0, 1, 2, 3, 4, 5, 6],
+   295→      ),
+   296→      pacePreference: PersistedDataParser.enumValue(
+   297→        PacePreference.values,
+   298→        map['pacePreference'],
+   299→        fallback: PacePreference.steady,
+   300→      ),
+   301→      hifzExperience: PersistedDataParser.enumValue(
+   302→        HifzExperience.values,
+   303→        map['hifzExperience'],
+   304→        fallback: HifzExperience.fresh,
+   305→      ),
+   306→    );
+   307→  }
+   308→}
+   309→
+   310→/// A single page's memorization progress record.
+   311→class PageProgress {
+   312→  final int pageNumber; // 1-604
+   313→  final String profileId;
+   314→  final PageStatus status;
+   315→  final DateTime? lastReviewedAt;
+   316→  final int reviewCount;
+   317→  final DateTime? memorizedAt;
+   318→  final int? lastVerseLearned; // CE-9: last verse covered (null = full page)
+   319→  final int? totalVersesOnPage; // CE-9: total verses on this page
+   320→
+   321→  const PageProgress({
+   322→    required this.pageNumber,
+   323→    required this.profileId,
+   324→    this.status = PageStatus.notStarted,
+   325→    this.lastReviewedAt,
+   326→    this.reviewCount = 0,
+   327→    this.memorizedAt,
+   328→    this.lastVerseLearned,
+   329→    this.totalVersesOnPage,
+   330→  });
+   331→
+   332→  Map<String, dynamic> toMap() => {
+   333→    'pageNumber': pageNumber,
+   334→    'profileId': profileId,
+   335→    'status': status.index,
+   336→    'lastReviewedAt': lastReviewedAt?.toIso8601String(),
+   337→    'reviewCount': reviewCount,
+   338→    'memorizedAt': memorizedAt?.toIso8601String(),
+   339→    'lastVerseLearned': lastVerseLearned,
+   340→    'totalVersesOnPage': totalVersesOnPage,
+   341→  };
+   342→
+   343→  factory PageProgress.fromMap(Map<String, dynamic> map) {
+   344→    return PageProgress(
+   345→      pageNumber: PersistedDataParser.intValue(
+   346→        map['pageNumber'],
+   347→        fallback: 1,
+   348→      ).clamp(1, 604),
+   349→      profileId: map['profileId'] as String,
+   350→      status: PersistedDataParser.enumValue(
+   351→        PageStatus.values,
+   352→        map['status'],
+   353→        fallback: PageStatus.notStarted,
+   354→      ),
+   355→      lastReviewedAt: PersistedDataParser.nullableDate(map['lastReviewedAt']),
+   356→      reviewCount: PersistedDataParser.intValue(
+   357→        map['reviewCount'],
+   358→        fallback: 0,
+   359→      ),
+   360→      memorizedAt: PersistedDataParser.nullableDate(map['memorizedAt']),
+   361→      lastVerseLearned: map['lastVerseLearned'] as int?,
+   362→      totalVersesOnPage: map['totalVersesOnPage'] as int?,
+   363→    );
+   364→  }
+   365→
+   366→  PageProgress copyWith({
+   367→    PageStatus? status,
+   368→    DateTime? lastReviewedAt,
+   369→    int? reviewCount,
+   370→    DateTime? memorizedAt,
+   371→    int? lastVerseLearned,
+   372→    int? totalVersesOnPage,
+   373→  }) {
+   374→    return PageProgress(
+   375→      pageNumber: pageNumber,
+   376→      profileId: profileId,
+   377→      status: status ?? this.status,
+   378→      lastReviewedAt: lastReviewedAt ?? this.lastReviewedAt,
+   379→      reviewCount: reviewCount ?? this.reviewCount,
+   380→      memorizedAt: memorizedAt ?? this.memorizedAt,
+   381→      lastVerseLearned: lastVerseLearned ?? this.lastVerseLearned,
+   382→      totalVersesOnPage: totalVersesOnPage ?? this.totalVersesOnPage,
+   383→    );
+   384→  }
+   385→}
+   386→
+   387→/// The generated daily plan for a specific profile.
+   388→class DailyPlan {
+   389→  final String id;
+   390→  final String profileId;
+   391→  final DateTime date;
+   392→
+   393→  // Sabaq: new memorization
+   394→  final int sabaqPage;
+   395→  final int sabaqLineStart;
+   396→  final int sabaqLineEnd;
+   397→  final int sabaqTargetMinutes;
+   398→  final int sabaqRepetitionTarget;
+   399→  final int?
+   400→  sabaqStartVerse; // CE-9: resume from this verse (partial page carry-over)
+   401→
+   402→  // Sabqi: recent review
+   403→  final List<int> sabqiPages; // page numbers from last 7-10 days
+   404→  final int sabqiTargetMinutes;
+   405→
+   406→  // Manzil: long-term review
+   407→  final int manzilJuz;
+   408→  final List<int> manzilPages;
+   409→  final int manzilRotationDay;
+   410→  final int manzilTargetMinutes;
+   411→
+   412→  // Status
+   413→  final bool sabaqDoneOffline;
+   414→  final bool sabqiDoneOffline;
+   415→  final bool manzilDoneOffline;
+   416→  final bool isCompleted;
+   417→
+   418→  // AI generation metadata
+   419→  final bool isAiGenerated;
+   420→  final String? aiReasoning;
+   421→
+   422→  const DailyPlan({
+   423→    required this.id,
+   424→    required this.profileId,
+   425→    required this.date,
+   426→    required this.sabaqPage,
+   427→    this.sabaqLineStart = 1,
+   428→    this.sabaqLineEnd = 15,
+   429→    this.sabaqTargetMinutes = 25,
+   430→    this.sabaqRepetitionTarget = 10,
+   431→    this.sabaqStartVerse,
+   432→    this.sabqiPages = const [],
+   433→    this.sabqiTargetMinutes = 15,
+   434→    this.manzilJuz = 30,
+   435→    this.manzilPages = const [],
+   436→    this.manzilRotationDay = 1,
+   437→    this.manzilTargetMinutes = 15,
+   438→    this.sabaqDoneOffline = false,
+   439→    this.sabqiDoneOffline = false,
+   440→    this.manzilDoneOffline = false,
+   441→    this.isCompleted = false,
+   442→    this.isAiGenerated = false,
+   443→    this.aiReasoning,
+   444→  });
+   445→
+   446→  /// Estimated total session time in minutes.
+   447→  int get estimatedMinutes =>
+   448→      sabaqTargetMinutes + sabqiTargetMinutes + manzilTargetMinutes;
+   449→
+   450→  /// Whether the sabqi (recent review) phase has any content today.
+   451→  bool get hasSabqiContent => sabqiPages.isNotEmpty;
+   452→
+   453→  /// Whether the manzil (long-term review) phase has any content today.
+   454→  bool get hasManzilContent => manzilPages.isNotEmpty;
+   455→
+   456→  /// Whether each phase needs no in-app work today.
+   457→  ///
+   458→  /// The generation-time `*DoneOffline` auto-skip is retired (roadmap
+   459→  /// Phase 1 task 7): generators never set the flags anymore. Empty phases
+   460→  /// are skipped through these derived checks instead, and the stored
+   461→  /// `*DoneOffline` flags carry exactly one meaning — the user marked the
+   462→  /// phase as completed outside the app (completion tracking, which stays
+   463→  /// until Phase 4 moves completion onto session facts).
+   464→  bool get isSabaqDone => sabaqDoneOffline;
+   465→
+   466→  /// See [isSabaqDone] — done offline, or generated with no sabqi content.
+   467→  bool get isSabqiDone => sabqiDoneOffline || sabqiPages.isEmpty;
+   468→
+   469→  /// See [isSabaqDone] — done offline, or generated with no manzil content.
+   470→  bool get isManzilDone => manzilDoneOffline || manzilPages.isEmpty;
+   471→
+   472→  DailyPlan copyWith({
+   473→    bool? sabaqDoneOffline,
+   474→    bool? sabqiDoneOffline,
+   475→    bool? manzilDoneOffline,
+   476→    bool? isCompleted,
+   477→    int? sabaqPage,
+   478→    int? sabaqStartVerse,
+   479→    List<int>? sabqiPages,
+   480→    List<int>? manzilPages,
+   481→    int? sabaqTargetMinutes,
+   482→    int? sabqiTargetMinutes,
+   483→    int? manzilTargetMinutes,
+   484→    int? sabaqRepetitionTarget,
+   485→    bool? isAiGenerated,
+   486→    String? aiReasoning,
+   487→  }) {
+   488→    return DailyPlan(
+   489→      id: id,
+   490→      profileId: profileId,
+   491→      date: date,
+   492→      sabaqPage: sabaqPage ?? this.sabaqPage,
+   493→      sabaqLineStart: sabaqLineStart,
+   494→      sabaqLineEnd: sabaqLineEnd,
+   495→      sabaqTargetMinutes: sabaqTargetMinutes ?? this.sabaqTargetMinutes,
+   496→      sabaqRepetitionTarget:
+   497→          sabaqRepetitionTarget ?? this.sabaqRepetitionTarget,
+   498→      sabaqStartVerse: sabaqStartVerse ?? this.sabaqStartVerse,
+   499→      sabqiPages: sabqiPages ?? this.sabqiPages,
+   500→      sabqiTargetMinutes: sabqiTargetMinutes ?? this.sabqiTargetMinutes,
+   501→      manzilJuz: manzilJuz,
+   502→      manzilPages: manzilPages ?? this.manzilPages,
+   503→      manzilRotationDay: manzilRotationDay,
+   504→      manzilTargetMinutes: manzilTargetMinutes ?? this.manzilTargetMinutes,
+   505→      sabaqDoneOffline: sabaqDoneOffline ?? this.sabaqDoneOffline,
+   506→      sabqiDoneOffline: sabqiDoneOffline ?? this.sabqiDoneOffline,
+   507→      manzilDoneOffline: manzilDoneOffline ?? this.manzilDoneOffline,
+   508→      isCompleted: isCompleted ?? this.isCompleted,
+   509→      isAiGenerated: isAiGenerated ?? this.isAiGenerated,
+   510→      aiReasoning: aiReasoning ?? this.aiReasoning,
+   511→    );
+   512→  }
+   513→
+   514→  Map<String, dynamic> toMap() => {
+   515→    'id': id,
+   516→    'profileId': profileId,
+   517→    'date': date.toIso8601String(),
+   518→    'sabaqPage': sabaqPage,
+   519→    'sabaqLineStart': sabaqLineStart,
+   520→    'sabaqLineEnd': sabaqLineEnd,
+   521→    'sabaqTargetMinutes': sabaqTargetMinutes,
+   522→    'sabaqRepetitionTarget': sabaqRepetitionTarget,
+   523→    'sabaqStartVerse': sabaqStartVerse,
+   524→    'sabqiPages': sabqiPages.join(','),
+   525→    'sabqiTargetMinutes': sabqiTargetMinutes,
+   526→    'manzilJuz': manzilJuz,
+   527→    'manzilPages': manzilPages.join(','),
+   528→    'manzilRotationDay': manzilRotationDay,
+   529→    'manzilTargetMinutes': manzilTargetMinutes,
+   530→    'sabaqDoneOffline': sabaqDoneOffline ? 1 : 0,
+   531→    'sabqiDoneOffline': sabqiDoneOffline ? 1 : 0,
+   532→    'manzilDoneOffline': manzilDoneOffline ? 1 : 0,
+   533→    'isCompleted': isCompleted ? 1 : 0,
+   534→    'isAiGenerated': isAiGenerated ? 1 : 0,
+   535→    'aiReasoning': aiReasoning,
+   536→  };
+   537→
+   538→  factory DailyPlan.fromMap(Map<String, dynamic> map) {
+   539→    return DailyPlan(
+   540→      id: map['id'] as String,
+   541→      profileId: map['profileId'] as String,
+   542→      date: PersistedDataParser.requiredDate(
+   543→        map['date'],
+   544→        field: 'daily_plan.date',
+   545→      ),
+   546→      sabaqPage: PersistedDataParser.intValue(
+   547→        map['sabaqPage'],
+   548→        fallback: 1,
+   549→      ).clamp(1, 604),
+   550→      sabaqLineStart: PersistedDataParser.intValue(
+   551→        map['sabaqLineStart'],
+   552→        fallback: 1,
+   553→      ),
+   554→      sabaqLineEnd: PersistedDataParser.intValue(
+   555→        map['sabaqLineEnd'],
+   556→        fallback: 15,
+   557→      ),
+   558→      sabaqTargetMinutes: PersistedDataParser.intValue(
+   559→        map['sabaqTargetMinutes'],
+   560→        fallback: 25,
+   561→      ),
+   562→      sabaqRepetitionTarget: PersistedDataParser.intValue(
+   563→        map['sabaqRepetitionTarget'],
+   564→        fallback: 10,
+   565→      ),
+   566→      sabaqStartVerse: map['sabaqStartVerse'] as int?,
+   567→      sabqiPages: PersistedDataParser.intList(
+   568→        map['sabqiPages'],
+   569→        minimum: 1,
+   570→        maximum: 604,
+   571→      ),
+   572→      sabqiTargetMinutes: PersistedDataParser.intValue(
+   573→        map['sabqiTargetMinutes'],
+   574→        fallback: 15,
+   575→      ),
+   576→      manzilJuz: PersistedDataParser.intValue(map['manzilJuz'], fallback: 30),
+   577→      manzilPages: PersistedDataParser.intList(
+   578→        map['manzilPages'],
+   579→        minimum: 1,
+   580→        maximum: 604,
+   581→      ),
+   582→      manzilRotationDay: PersistedDataParser.intValue(
+   583→        map['manzilRotationDay'],
+   584→        fallback: 1,
+   585→      ),
+   586→      manzilTargetMinutes: PersistedDataParser.intValue(
+   587→        map['manzilTargetMinutes'],
+   588→        fallback: 15,
+   589→      ),
+   590→      sabaqDoneOffline: (map['sabaqDoneOffline'] as int?) == 1,
+   591→      sabqiDoneOffline: (map['sabqiDoneOffline'] as int?) == 1,
+   592→      manzilDoneOffline: (map['manzilDoneOffline'] as int?) == 1,
+   593→      isCompleted: (map['isCompleted'] as int?) == 1,
+   594→      isAiGenerated: (map['isAiGenerated'] as int?) == 1,
+   595→      aiReasoning: map['aiReasoning'] as String?,
+   596→    );
+   597→  }
+   598→}
+   599→
+   600→/// A completed session record saved to history.
+   601→class SessionRecord {
+   602→  final String id;
+   603→  final String profileId;
+   604→  final DateTime date;
+   605→  final int durationMinutes;
+   606→
+   607→  // Which phases were completed
+   608→  final bool sabaqCompleted;
+   609→  final bool sabqiCompleted;
+   610→  final bool manzilCompleted;
+   611→
+   612→  // Self-assessments per phase
+   613→  final SelfAssessment? sabaqAssessment;
+   614→  final SelfAssessment? sabqiAssessment;
+   615→  final SelfAssessment? manzilAssessment;
+   616→
+   617→  // What was covered
+   618→  final int? sabaqPage;
+   619→  final List<int> sabqiPages;
+   620→  final List<int> manzilPages;
+   621→  final int repCount;
+   622→
+   623→  const SessionRecord({
+   624→    required this.id,
+   625→    required this.profileId,
+   626→    required this.date,
+   627→    required this.durationMinutes,
+   628→    this.sabaqCompleted = false,
+   629→    this.sabqiCompleted = false,
+   630→    this.manzilCompleted = false,
+   631→    this.sabaqAssessment,
+   632→    this.sabqiAssessment,
+   633→    this.manzilAssessment,
+   634→    this.sabaqPage,
+   635→    this.sabqiPages = const [],
+   636→    this.manzilPages = const [],
+   637→    this.repCount = 0,
+   638→  });
+   639→
+   640→  Map<String, dynamic> toMap() => {
+   641→    'id': id,
+   642→    'profileId': profileId,
+   643→    'date': date.toIso8601String(),
+   644→    'durationMinutes': durationMinutes,
+   645→    'sabaqCompleted': sabaqCompleted ? 1 : 0,
+   646→    'sabqiCompleted': sabqiCompleted ? 1 : 0,
+   647→    'manzilCompleted': manzilCompleted ? 1 : 0,
+   648→    'sabaqAssessment': sabaqAssessment?.index,
+   649→    'sabqiAssessment': sabqiAssessment?.index,
+   650→    'manzilAssessment': manzilAssessment?.index,
+   651→    'sabaqPage': sabaqPage,
+   652→    'sabqiPages': sabqiPages.join(','),
+   653→    'manzilPages': manzilPages.join(','),
+   654→    'repCount': repCount,
+   655→  };
+   656→
+   657→  factory SessionRecord.fromMap(Map<String, dynamic> map) {
+   658→    return SessionRecord(
+   659→      id: map['id'] as String,
+   660→      profileId: map['profileId'] as String,
+   661→      date: PersistedDataParser.requiredDate(
+   662→        map['date'],
+   663→        field: 'session.date',
+   664→      ),
+   665→      durationMinutes: PersistedDataParser.intValue(
+   666→        map['durationMinutes'],
+   667→        fallback: 0,
+   668→      ).clamp(0, 100000),
+   669→      sabaqCompleted: (map['sabaqCompleted'] as int?) == 1,
+   670→      sabqiCompleted: (map['sabqiCompleted'] as int?) == 1,
+   671→      manzilCompleted: (map['manzilCompleted'] as int?) == 1,
+   672→      sabaqAssessment: map['sabaqAssessment'] == null
+   673→          ? null
+   674→          : PersistedDataParser.enumValue(
+   675→              SelfAssessment.values,
+   676→              map['sabaqAssessment'],
+   677→              fallback: SelfAssessment.okay,
+   678→            ),
+   679→      sabqiAssessment: map['sabqiAssessment'] == null
+   680→          ? null
+   681→          : PersistedDataParser.enumValue(
+   682→              SelfAssessment.values,
+   683→              map['sabqiAssessment'],
+   684→              fallback: SelfAssessment.okay,
+   685→            ),
+   686→      manzilAssessment: map['manzilAssessment'] == null
+   687→          ? null
+   688→          : PersistedDataParser.enumValue(
+   689→              SelfAssessment.values,
+   690→              map['manzilAssessment'],
+   691→              fallback: SelfAssessment.okay,
+   692→            ),
+   693→      sabaqPage: map['sabaqPage'] as int?,
+   694→      sabqiPages: PersistedDataParser.intList(
+   695→        map['sabqiPages'],
+   696→        minimum: 1,
+   697→        maximum: 604,
+   698→      ),
+   699→      manzilPages: PersistedDataParser.intList(
+   700→        map['manzilPages'],
+   701→        minimum: 1,
+   702→        maximum: 604,
+   703→      ),
+   704→      repCount: map['repCount'] as int? ?? 0,
+   705→    );
+   706→  }
+   707→}
+   708→
+   709→/// Streak tracking data for a profile.
+   710→class StreakData {
+   711→  final int totalActiveDays;
+   712→  final DateTime? lastActiveDate;
+   713→
+   714→  const StreakData({this.totalActiveDays = 0, this.lastActiveDate});
+   715→}
+   716→
+   717→// ── Phase 5: Analytics & Adaptive Intelligence ──
+   718→
+   719→/// Type of adaptive suggestion shown to the user.
+   720→enum SuggestionType {
+   721→  increaseLoad, // Doing great → suggest more
+   722→  decreaseLoad, // Struggling → suggest less
+   723→  moreReview, // Weak assessments → more review time
+   724→  takeBreak, // Missing sessions → lighter plan
+   725→  aheadOfSchedule, // Ahead → celebrate + optional extra review
+   726→  neglectedJuz, // Juz not reviewed in N days
+   727→  strugglePage, // Consistently weak section detected
+   728→}
+   729→
+   730→/// User action on a suggestion.
+   731→enum SuggestionAction { pending, accepted, dismissed, remindLater }
+   732→
+   733→/// Analytics time period.
+   734→enum AnalyticsPeriod { week, month }
+   735→
+   736→/// An adaptive suggestion displayed as a card on the dashboard.
+   737→class Suggestion {
+   738→  final String id;
+   739→  final SuggestionType type;
+   740→  final String iconKey;
+   741→  final String title;
+   742→  final String message;
+   743→  final SuggestionAction action;
+   744→  final DateTime createdAt;
+   745→  final Map<String, dynamic>
+   746→  data; // Context-specific payload (e.g., juz number)
+   747→
+   748→  const Suggestion({
+   749→    required this.id,
+   750→    required this.type,
+   751→    required this.iconKey,
+   752→    required this.title,
+   753→    required this.message,
+   754→    this.action = SuggestionAction.pending,
+   755→    required this.createdAt,
+   756→    this.data = const {},
+   757→  });
+   758→
+   759→  Suggestion copyWith({SuggestionAction? action}) {
+   760→    return Suggestion(
+   761→      id: id,
+   762→      type: type,
+   763→      iconKey: iconKey,
+   764→      title: title,
+   765→      message: message,
+   766→      action: action ?? this.action,
+   767→      createdAt: createdAt,
+   768→      data: data,
+   769→    );
+   770→  }
+   771→}
+   772→
+   773→/// A snapshot of analytics data for a time period (week or month).
+   774→class WeeklySnapshot {
+   775→  final DateTime startDate;
+   776→  final DateTime endDate;
+   777→
+   778→  // Session metrics
+   779→  final int totalSessions;
+   780→  final int totalDurationMinutes;
+   781→  final double avgDurationMinutes;
+   782→  final Map<int, int> sessionsPerDay; // day-of-week (1=Mon) → count
+   783→
+   784→  // Completion
+   785→  final int plannedDays; // days with a plan
+   786→  final int completedDays; // days plan was completed
+   787→  final double completionRate; // 0.0–1.0
+   788→
+   789→  // Assessment distribution (across all sessions)
+   790→  final int strongCount;
+   791→  final int okayCount;
+   792→  final int needsWorkCount;
+   793→
+   794→  // Progress
+   795→  final int pagesMemorized; // new pages memorized this period
+   796→  final int pagesReviewed; // pages reviewed this period
+   797→  final double pagesPerWeek; // pace calculation
+   798→
+   799→  const WeeklySnapshot({
+   800→    required this.startDate,
+   801→    required this.endDate,
+   802→    this.totalSessions = 0,
+   803→    this.totalDurationMinutes = 0,
+   804→    this.avgDurationMinutes = 0,
+   805→    this.sessionsPerDay = const {},
+   806→    this.plannedDays = 0,
+   807→    this.completedDays = 0,
+   808→    this.completionRate = 0,
+   809→    this.strongCount = 0,
+   810→    this.okayCount = 0,
+   811→    this.needsWorkCount = 0,
+   812→    this.pagesMemorized = 0,
+   813→    this.pagesReviewed = 0,
+   814→    this.pagesPerWeek = 0,
+   815→  });
+   816→
+   817→  /// Total assessment count across all sessions.
+   818→  int get totalAssessments => strongCount + okayCount + needsWorkCount;
+   819→
+   820→  /// Whether this snapshot has enough data for meaningful analysis.
+   821→  bool get hasEnoughData => totalSessions >= 3;
+   822→}
+   823→

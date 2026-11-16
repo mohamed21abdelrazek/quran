@@ -71,3 +71,34 @@ model Activity {
   totalTasks  Int    @default(0)
   xpGained    Int    @default(0)
 }
+
+// كلمة صعبة علّمها الحافظ داخل آية — قائمة مراجعة شخصية
+model DifficultWord {
+  id        Int      @id @default(autoincrement())
+  key       String // "س:آية" مثل 2:255
+  word      String // نص الكلمة كما في المصحف
+  surah     Int
+  ayah      Int
+  page      Int
+  createdAt DateTime @default(now())
+
+  @@unique([key, word])
+}
+
+// علامة مرجعية على صفحة من المصحف
+model Bookmark {
+  page      Int      @id
+  createdAt DateTime @default(now())
+}
+
+// سجل جلسات الاختبار والتسميع (بطاقات / تسميع كتابي)
+model QuizLog {
+  id        Int      @id @default(autoincrement())
+  date      String // YYYY-MM-DD
+  kind      String // cards | tasmee
+  score     Int // 0..100
+  correct   Int
+  total     Int
+  detail    String? // وصف قصير للجلسة (النطاق مثلاً)
+  createdAt DateTime @default(now())
+}

@@ -1,6 +1,7 @@
 // محرك خطة المراجعة الذكية: تكرار متباعد + تركيز على الأضعف + قاعدة عدم النسيان (10 أيام)
 import { db } from "@/lib/db"
 import { BADGES, INTENSITY_META, levelFromXp, motivationFor } from "./content"
+import { getToolsState } from "./tools"
 import type { Intensity, Quality } from "./content"
 import { juzPageRange, pageToJuz, pagesLabel, surahsInRange, TOTAL_JUZ, TOTAL_PAGES } from "./quran"
 import { formatDays } from "./format"
@@ -581,6 +582,11 @@ export async function buildAppState(): Promise<AppState> {
       attention: [],
       stats: { totalDonePages: 0, completionRate: 0, remainingFirstPass: 0, cycleDays: 0, perfectDays: 0 },
       badges: BADGES.map((b) => ({ id: b.id, earned: false })),
+      tools: {
+        difficult: [],
+        bookmarks: [],
+        quiz: { recent: [], totalSessions: 0, avgScore: 0, bestScore: 0 },
+      },
     }
   }
 
@@ -753,6 +759,9 @@ export async function buildAppState(): Promise<AppState> {
 
   const level = levelFromXp(profile.xp)
 
+  // أدوات الحفظ (كلمات صعبة / علامات / اختبارات)
+  const tools = await getToolsState()
+
   return {
     today,
     onboarded: true,
@@ -799,6 +808,7 @@ export async function buildAppState(): Promise<AppState> {
       perfectDays,
     },
     badges,
+    tools,
   }
 }
 

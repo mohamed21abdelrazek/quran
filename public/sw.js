@@ -1,7 +1,7 @@
 /* عامل الخدمة — وِردي يعمل أوفلاين بالكامل:
    المصحف والمتشابهات بيانات محلية في التطبيق أصلاً؛
    الخطوط محلية في /fonts؛ والتلاوات تُخزَّن بعد أول تشغيل. */
-const CACHE = "wardi-v2"
+const CACHE = "wardi-v3"
 
 const FONTS = [
   "/fonts/amiri-arabic-400.woff2",
@@ -35,6 +35,8 @@ const CORE = [
   "/icons/icon-512.png",
   "/icons/icon-maskable-512.png",
   "/icons/apple-touch-icon.png",
+  "/data/tafsir-muyassar.json",
+  "/data/asbab-nuzul.json",
   ...FONTS,
 ]
 

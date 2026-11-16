@@ -8,6 +8,7 @@ import { DashboardView } from "@/components/quran-app/dashboard"
 import { ProgressView } from "@/components/quran-app/progress-view"
 import { SettingsView } from "@/components/quran-app/settings-view"
 import { MushafView, type WirdTarget } from "@/components/quran-app/mushaf-view"
+import { TestView } from "@/components/quran-app/test-view"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useTheme } from "next-themes"
@@ -23,9 +24,10 @@ import {
   Star,
   RefreshCw,
   WifiOff,
+  GraduationCap,
 } from "lucide-react"
 
-type View = "today" | "mushaf" | "progress" | "settings"
+type View = "today" | "mushaf" | "progress" | "settings" | "test"
 
 function ThemeToggle() {
   const { setTheme, resolvedTheme } = useTheme()
@@ -58,6 +60,12 @@ export default function Page() {
   /** الانتقال المباشر إلى الوِرد داخل المصحف */
   const openWird = (from: number, to: number, label: string) => {
     setWird({ from, to, label })
+    setView("mushaf")
+  }
+
+  /** الانتقال إلى صفحة محددة في المصحف (من قسم اختبرني) */
+  const openMushaf = (page: number, label: string) => {
+    setWird({ from: page, to: page, label, visit: true })
     setView("mushaf")
   }
 
@@ -149,20 +157,24 @@ export default function Page() {
         {/* التبويبات */}
         <div className="mx-auto w-full max-w-5xl px-4 pb-2.5">
           <Tabs value={view} onValueChange={(v) => setView(v as View)}>
-            <TabsList className="grid h-11 w-full grid-cols-4">
-              <TabsTrigger value="today" className="gap-1.5 text-xs sm:text-sm">
+            <TabsList className="grid h-11 w-full grid-cols-5">
+              <TabsTrigger value="today" className="gap-1 text-[10px] sm:text-xs">
                 <CalendarCheck2 className="h-4 w-4" />
                 يومي
               </TabsTrigger>
-              <TabsTrigger value="mushaf" className="gap-1.5 text-xs sm:text-sm">
+              <TabsTrigger value="mushaf" className="gap-1 text-[10px] sm:text-xs">
                 <BookOpen className="h-4 w-4" />
                 المصحف
               </TabsTrigger>
-              <TabsTrigger value="progress" className="gap-1.5 text-xs sm:text-sm">
+              <TabsTrigger value="test" className="gap-1 text-[10px] sm:text-xs">
+                <GraduationCap className="h-4 w-4" />
+                اختبرني
+              </TabsTrigger>
+              <TabsTrigger value="progress" className="gap-1 text-[10px] sm:text-xs">
                 <TrendingUp className="h-4 w-4" />
                 تقدمي
               </TabsTrigger>
-              <TabsTrigger value="settings" className="gap-1.5 text-xs sm:text-sm">
+              <TabsTrigger value="settings" className="gap-1 text-[10px] sm:text-xs">
                 <Settings2 className="h-4 w-4" />
                 خطتي
               </TabsTrigger>
@@ -180,10 +192,12 @@ export default function Page() {
             state={state}
             wird={wird}
             onCloseWird={() => setWird(null)}
+            action={action}
           />
         )}
         {view === "progress" && <ProgressView state={state} />}
         {view === "settings" && <SettingsView state={state} load={load} action={action} />}
+        {view === "test" && <TestView state={state} load={load} action={action} openMushaf={openMushaf} />}
       </main>
 
       {/* تذييل ثابت أسفل الصفحة */}
