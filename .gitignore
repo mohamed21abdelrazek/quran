@@ -53,3 +53,10 @@ server.log
 # Skills directory
 /skills/tool-results/
 tool-results/
+
+# نسخة الأوفلاين وتطبيق أندرويد
+.offline-build-backup/
+android-shell/www/
+android-shell/android/
+android-shell/dist/
+android-shell/node_modules/

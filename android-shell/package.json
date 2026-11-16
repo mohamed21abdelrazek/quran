@@ -1,0 +1,15 @@
+{
+  "name": "wirdi-android",
+  "private": true,
+  "version": "1.0.0",
+  "description": "تغليف نسخة وِردي الأوفلاين في تطبيق أندرويد (Capacitor)",
+  "scripts": {
+    "build:apk": "bash build-apk.sh"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^7.4.0",
+    "@capacitor/cli": "^7.4.0",
+    "@capacitor/core": "^7.4.0",
+    "sharp": "^0.34.3"
+  }
+}

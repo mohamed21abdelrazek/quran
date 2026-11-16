@@ -1,12 +1,29 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from "next"
 
-const nextConfig: NextConfig = {
-  output: "standalone",
-  /* config options here */
+/* بناء النسخة الأوفلاين (تطبيق الجوال):
+   WARDI_OFFLINE=1 next build
+   - تصدير ثابت (output: export) بلا خادم
+   - يسبقه scripts/build-offline.sh: تبديل مؤقت لوحدتي "@/lib/db"
+     و"@/lib/client-backend/entry" إلى النسختين المحليتين (db-offline / offline)
+   نسخة الموقع العادية (خادم + Prisma) لا تتأثر إطلاقاً. */
+const OFFLINE = process.env.WARDI_OFFLINE === "1"
+
+const baseConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-};
+}
 
-export default nextConfig;
+const nextConfig: NextConfig = OFFLINE
+  ? {
+      ...baseConfig,
+      output: "export",
+      images: { unoptimized: true },
+    }
+  : {
+      ...baseConfig,
+      output: "standalone",
+    }
+
+export default nextConfig

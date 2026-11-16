@@ -1,0 +1,74 @@
+name: Android Offline APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "public/**"
+      - "scripts/**"
+      - "android-shell/**"
+      - ".github/workflows/android.yml"
+      - "package.json"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ===== 1) بناء النسخة الأوفلاين الثابتة =====
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build offline static export
+        run: bash scripts/build-offline.sh
+
+      # ===== 2) التغليف في APK =====
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Ensure Android SDK components
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "build-tools;35.0.0" "platforms;android-35" > /dev/null || true
+          sdkmanager "build-tools;36.0.0" "platforms;android-36" > /dev/null || true
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+      - name: Build APK (Capacitor)
+        run: bash android-shell/build-apk.sh
+
+      # ===== 3) النشر كإصدار على GitHub =====
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="v$VERSION"
+          APK="wirdi-offline-v$VERSION.apk"
+          cp android-shell/dist/wirdi-offline.apk "$APK"
+          echo "الإصدار: $TAG — الملف: $APK"
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" "$APK" \
+              --title "وِردي $VERSION — تطبيق أندرويد يعمل بلا إنترنت" \
+              --notes-file android-shell/RELEASE_NOTES.md \
+              --latest
+          else
+            gh release upload "$TAG" "$APK" --clobber
+          fi

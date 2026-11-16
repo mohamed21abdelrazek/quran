@@ -15,6 +15,7 @@ import { formatDays, formatPages, pagesToRanges } from "@/lib/format"
 import { juzPageRange } from "@/lib/quran"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
+import { backendAction } from "@/lib/client-backend/entry"
 import {
   BookOpen,
   Sparkles,
@@ -93,20 +94,15 @@ export function OnboardingView({ onComplete }: { onComplete: () => void }) {
   const submit = async () => {
     setSubmitting(true)
     try {
-      const res = await fetch("/api/onboarding", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          ranges: pagesToRanges([...selected]),
-          baseline: BASELINE_META[baseline].strength,
-          dailyCapacity: capacity,
-          unitSize,
-          intensity,
-          autoAdjust,
-        }),
+      await backendAction("/api/onboarding", {
+        name: name.trim(),
+        ranges: pagesToRanges([...selected]),
+        baseline: BASELINE_META[baseline].strength,
+        dailyCapacity: capacity,
+        unitSize,
+        intensity,
+        autoAdjust,
       })
-      if (!res.ok) throw new Error()
       toast({ title: "تقبل الله منك!", description: "جهزنا لك خطة اليوم — انطلق" })
       onComplete()
     } catch {

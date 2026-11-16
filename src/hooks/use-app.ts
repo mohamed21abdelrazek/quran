@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useToast } from "@/hooks/use-toast"
+import { backendMode, backendLoad, backendAction } from "@/lib/client-backend/entry"
 import type { AppState, TaskDTO } from "@/lib/types"
 
 const LS_STATE = "wardi:state:v1"
 const LS_QUEUE = "wardi:queue:v1"
+const OFFLINE_APP = backendMode === "offline" // نسخة الجوال تعمل بلا خادم أصلاً
 
 interface QueueItem {
   url: string
@@ -42,19 +44,25 @@ export function useApp() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/app", { cache: "no-store" })
-      if (!res.ok) throw new Error("bad response")
-      const data: AppState = await res.json()
+      const data = await backendLoad()
       setState(data)
       setError(null)
       setOffline(false)
-      // لقطة أوفلاين: تُقرأ عند أي انقطاع قادم
-      try {
-        localStorage.setItem(LS_STATE, JSON.stringify(data))
-      } catch {
-        /* تجاهل */
+      // لقطة أوفلاين (نسخة الموقع فقط): تُقرأ عند أي انقطاع قادم
+      if (!OFFLINE_APP) {
+        try {
+          localStorage.setItem(LS_STATE, JSON.stringify(data))
+        } catch {
+          /* تجاهل */
+        }
       }
     } catch {
+      // نسخة الجوال: لا يوجد خادم — هذا خطأ حقيقي
+      if (OFFLINE_APP) {
+        setError("تعذر تحميل البيانات من جهازك، أعد فتح التطبيق")
+        setLoading(false)
+        return
+      }
       // انقطاع الاتصال: استخدم آخر لقطة محفوظة (المصحف والمتشابهات محليان أصلاً)
       try {
         const snap = localStorage.getItem(LS_STATE)
@@ -78,21 +86,17 @@ export function useApp() {
   }, [load])
 
   /**
-   * تنفيذ إجراء — وعند انقطاع الاتصال يُحفظ في قائمة انتظار
+   * تنفيذ إجراء — في نسخة الجوال يُنفَّذ محلياً فوراً؛
+   * وفي نسخة الموقع عند انقطاع الاتصال يُحفظ في قائمة انتظار
    * محلية ويُرسل تلقائياً فور عودة الشبكة.
    */
   const action = useCallback(async (url: string, body: unknown): Promise<Record<string, unknown>> => {
+    if (OFFLINE_APP) {
+      // لا شبكة ولا خادم — الإجراء يعمل مباشرة على بيانات الجهاز
+      return backendAction(url, body)
+    }
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
-      if (!res.ok) {
-        throw new Error((data?.error as string) ?? "حدث خطأ غير متوقع")
-      }
-      return data
+      return await backendAction(url, body)
     } catch (e) {
       // فشل شبكي (انقطاع اتصال أو خادم غير متاح) — ضعه في قائمة الانتظار
       if (e instanceof TypeError) {
@@ -126,6 +130,7 @@ export function useApp() {
             },
           }
     setState((prev) => (prev ? apply(prev) : prev))
+    if (OFFLINE_APP) return // لا لقطة مزامنة في نسخة الجوال — البيانات محلية أصلاً
     try {
       const snap = localStorage.getItem(LS_STATE)
       if (snap) {
@@ -137,9 +142,9 @@ export function useApp() {
     }
   }, [])
 
-  /** إرسال كل الإجراءات المؤجلة — يُستدعى تلقائياً عند عودة الاتصال */
+  /** إرسال كل الإجراءات المؤجلة — يُستدعى تلقائياً عند عودة الاتصال (نسخة الموقع) */
   const flushQueue = useCallback(async () => {
-    if (flushing.current) return
+    if (OFFLINE_APP || flushing.current) return
     const items = readQueue()
     if (items.length === 0) return
     flushing.current = true
@@ -148,17 +153,16 @@ export function useApp() {
     while (remaining.length > 0) {
       const it = remaining[0]
       try {
-        // أي استجابة من الخادم (حتى 4xx) تعني الاستلام — لا نعيد الإرسال أبداً
-        await fetch(it.url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(it.body),
-        })
+        await backendAction(it.url, it.body)
         remaining.shift()
         synced++
         writeQueue(remaining)
-      } catch {
-        break // ما زال بلا اتصال — المحاولة التالية عند العودة
+      } catch (e) {
+        // أي استجابة من الخادم (حتى 4xx) تعني الاستلام — لا نعيد الإرسال أبداً؛
+        // فشل الشبكة فقط يبقى في القائمة
+        if (e instanceof TypeError) break
+        remaining.shift()
+        synced++
       }
     }
     writeQueue(remaining)
@@ -189,8 +193,9 @@ export function useApp() {
     }
   }, [load, flushQueue])
 
-  // أحداث الاتصال + مزامنة أولية (لاسترجاع ما فات أثناء إغلاق التطبيق)
+  // أحداث الاتصال + مزامنة أولية (نسخة الموقع — لاسترجاع ما فات أثناء إغلاق التطبيق)
   useEffect(() => {
+    if (OFFLINE_APP) return
     const goOnline = () => {
       setOffline(false)
       flushQueue()
