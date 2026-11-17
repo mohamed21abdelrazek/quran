@@ -44,6 +44,8 @@ import {
   Book,
   Maximize2,
   Download,
+  ChevronDown,
+  Settings2,
 } from "lucide-react"
 import { SURAHS, TOTAL_PAGES, pageToJuz, pagesLabel } from "@/lib/quran"
 import { BISMILLAH, getNextAyahText, getPagePayload } from "@/lib/mushaf-data"
@@ -253,24 +255,36 @@ let lastFontScale = 1
 
 interface MadaniPageProps {
   n: number
+  /** نمط القراءة الحالي — يحدد فلتر الصورة */
+  mode: ReadingMode
+  /** اتجاه التقليب الأخير — لحركة الانزلاق */
+  dir: 1 | -1
   /** فتح العارض المكبّر */
   onOpen: () => void
-  /** سحب أفقي: ١ = الصفحة التالية، -١ = السابقة */
+  /** سحب/زر: ١ = الصفحة التالية، -١ = السابقة */
   onSwipe: (dir: 1 | -1) => void
   /** التعذر — العودة للنص التفاعلي */
   onFallback: () => void
 }
 
-/** صورة صفحة حقيقية من مصحف المدينة — محمّلة من ملفات التطبيق محلياً.
- *  يُعاد تركيبها مع كل صفحة (key) — فلا حاجة لإعادة ضبط حالة التحميل */
-function MadaniPage({ n, onOpen, onSwipe, onFallback }: MadaniPageProps) {
+/** فلاتر الصورة حسب نمط القراءة — ورقية دافئة وليلية معتمة */
+const MADANI_FILTER: Record<ReadingMode, string> = {
+  light: "",
+  sepia: "sepia(0.38) saturate(0.92) brightness(1.03)",
+  night: "brightness(0.82) contrast(0.96)",
+}
+
+/** صورة صفحة حقيقية من مصحف المدينة — عرض غامر فاخر:
+ *  الصفحة هي البطل: إطار ذهبي مزدوج، ظل عميق، أزرار تقليب عائمة،
+ *  وحركة انزلاقية باتجاه التقليب. يُعاد تركيبها مع كل صفحة (key). */
+function MadaniPage({ n, mode, dir, onOpen, onSwipe, onFallback }: MadaniPageProps) {
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
 
   return (
     <div
-      className="relative mx-auto w-full max-w-2xl touch-pan-y select-none"
+      className="relative mx-auto w-full max-w-[38rem] touch-pan-y select-none"
       onTouchStart={(e) => {
         const t = e.touches[0]
         touchStart.current = { x: t.clientX, y: t.clientY }
@@ -285,43 +299,86 @@ function MadaniPage({ n, onOpen, onSwipe, onFallback }: MadaniPageProps) {
         if (Math.abs(dx) >= 60 && Math.abs(dy) <= 50) onSwipe(dx < 0 ? 1 : -1)
       }}
     >
+      {/* هالة ذهبية خلف الصفحة */}
       <div
-        className="relative overflow-hidden rounded-lg border-2 border-gold/50 bg-white shadow-md dark:border-gold/25"
-        style={{ aspectRatio: "1260 / 2038" }}
+        aria-hidden
+        className="absolute inset-x-6 top-4 bottom-4 -z-10 rounded-2xl bg-gold/10 blur-2xl dark:bg-gold/5"
+      />
+
+      {/* أزرار التقليب العائمة — سطح المكتب */}
+      <button
+        type="button"
+        onClick={() => onSwipe(1)}
+        disabled={n >= TOTAL_PAGES}
+        aria-label="الصفحة التالية"
+        className="absolute -left-16 top-1/2 z-20 hidden h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-gold/50 bg-background/90 text-foreground shadow-lg backdrop-blur transition-all hover:scale-110 hover:border-gold hover:text-primary disabled:pointer-events-none disabled:opacity-30 lg:flex"
       >
-        {!loaded && !failed && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-muted/70">
-            <Loader2 className="h-6 w-6 animate-spin text-primary/70" />
-            <p className="text-[11px] font-extrabold text-muted-foreground">جارٍ فتح الصفحة {arNum(n)}…</p>
-          </div>
-        )}
-        {failed ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-muted p-6 text-center">
-            <AlertTriangle className="h-8 w-8 text-amber-500" />
-            <p className="text-sm font-bold text-foreground">تعذّر عرض صورة هذه الصفحة</p>
-            <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onFallback}>
-              <BookOpenText className="h-3.5 w-3.5" />
-              التبديل للنص العثماني
-            </Button>
-          </div>
-        ) : (
-          <img
-            key={n}
-            src={madaniPageUrl(n)}
-            alt={`صفحة ${arNum(n)} من مصحف المدينة المنورة — الجزء ${arNum(pageToJuz(n))}`}
-            onLoad={() => setLoaded(true)}
-            onError={() => setFailed(true)}
-            onClick={onOpen}
-            draggable={false}
-            className={cn(
-              "h-full w-full cursor-zoom-in bg-white object-contain transition-opacity duration-300 dark:brightness-[0.85]",
-              loaded ? "opacity-100" : "opacity-0",
-            )}
-          />
-        )}
+        <ChevronLeft className="h-6 w-6" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onSwipe(-1)}
+        disabled={n <= 1}
+        aria-label="الصفحة السابقة"
+        className="absolute -right-16 top-1/2 z-20 hidden h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full border border-gold/50 bg-background/90 text-foreground shadow-lg backdrop-blur transition-all hover:scale-110 hover:border-gold hover:text-primary disabled:pointer-events-none disabled:opacity-30 lg:flex"
+      >
+        <ChevronRight className="h-6 w-6" />
+      </button>
+
+      {/* الصفحة نفسها — إطار ذهبي مزدوج */}
+      <div
+        className="relative rounded-md bg-gradient-to-b from-gold/60 via-gold/40 to-gold/60 p-[3px] shadow-[0_18px_50px_-12px_rgba(120,90,20,0.35)] dark:from-gold/35 dark:via-gold/20 dark:to-gold/35"
+      >
+        <div
+          className="relative overflow-hidden rounded-[5px] border border-gold/40 bg-white dark:border-gold/30 dark:bg-[#101210]"
+          style={{ aspectRatio: "1260 / 2038" }}
+        >
+          {!loaded && !failed && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-muted/60 backdrop-blur-sm">
+              <Loader2 className="h-7 w-7 animate-spin text-primary/70" />
+              <p className="text-xs font-extrabold text-muted-foreground">جارٍ فتح الصفحة {arNum(n)}…</p>
+            </div>
+          )}
+          {failed ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-muted p-6 text-center">
+              <AlertTriangle className="h-8 w-8 text-amber-500" />
+              <p className="text-sm font-bold text-foreground">تعذّر عرض صورة هذه الصفحة</p>
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onFallback}>
+                <BookOpenText className="h-3.5 w-3.5" />
+                التبديل للنص العثماني
+              </Button>
+            </div>
+          ) : (
+            <img
+              key={n}
+              src={madaniPageUrl(n)}
+              alt={`صفحة ${arNum(n)} من مصحف المدينة المنورة — الجزء ${arNum(pageToJuz(n))}`}
+              onLoad={() => setLoaded(true)}
+              onError={() => setFailed(true)}
+              onClick={onOpen}
+              draggable={false}
+              style={{ filter: MADANI_FILTER[mode] }}
+              className={cn(
+                "h-full w-full animate-in fade-in duration-300 cursor-zoom-in bg-white object-contain transition-opacity",
+                dir === 1 ? "slide-in-from-right-12" : "slide-in-from-left-12",
+                loaded ? "opacity-100" : "opacity-0",
+              )}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* رقم الصفحة بزخرفة */}
+      <div className="mt-4 flex items-center justify-center gap-3" aria-hidden>
+        <span className="h-px w-14 bg-gradient-to-l from-transparent to-gold/60 sm:w-20" />
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/50 bg-gold/10 px-3.5 py-1 text-[11px] font-extrabold tabular-nums text-amber-800 dark:border-gold/30 dark:bg-gold/10 dark:text-gold">
+          {arNum(n)}
+          <span className="text-muted-foreground">/ {arNum(TOTAL_PAGES)}</span>
+        </span>
+        <span className="h-px w-14 bg-gradient-to-r from-transparent to-gold/60 sm:w-20" />
       </div>
       <p className="mt-2 text-center text-[10px] font-bold text-muted-foreground">
-        اضغط الصورة للتكبير • اسحب يميناً أو يساراً لتقليب الصفحات
+        اضغط الصورة للتكبير • اسحب لتقليب الصفحات
       </p>
     </div>
   )
@@ -329,6 +386,8 @@ function MadaniPage({ n, onOpen, onSwipe, onFallback }: MadaniPageProps) {
 
 export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
   const [page, setPage] = useState<number>(wird?.from ?? lastPageVisited)
+  // اتجاه آخر تقليب — لحركة انزلاق الصفحة المصوّرة
+  const [flipDir, setFlipDir] = useState<1 | -1>(1)
   const [focusKey, setFocusKey] = useState<string | null>(null)
   const [fontScale, setFontScale] = useState(lastFontScale)
   const [mode, setMode] = useState<ReadingMode>("light")
@@ -338,6 +397,10 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
   const [zoom, setZoom] = useState(1)
   // تقدم حفظ صور المصحف كاملة (نسخة الويب)
   const [dlProgress, setDlProgress] = useState<number | null>(null)
+  // أدوات الصفحة (آيات/متشابهات/تحميل) — مطوية افتراضياً حتى تبقى الصفحة هي البطل
+  const [toolsOpen, setToolsOpen] = useState(false)
+  // لوحة الأدوات الكاملة في وضع الصور — مطوية افتراضياً
+  const [mushafToolsOpen, setMushafToolsOpen] = useState(false)
   const [isNative] = useState(() => typeof window !== "undefined" && "Capacitor" in window)
   // بطاقة الآية: التفسير وأسباب النزول وتعليم الكلمات الصعبة
   const [cardKey, setCardKey] = useState<string | null>(null)
@@ -481,7 +544,19 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
 
   const jumpTo = (p: number) => {
     setFocusKey(null)
-    if (p !== page) setPage(p)
+    if (p !== page) {
+      setFlipDir(p > page ? 1 : -1)
+      setPage(p)
+    }
+  }
+
+  /** الانتقال الموحد لصفحة — يحدّث اتجاه الحركة */
+  const goto = (p: number) => {
+    const clamped = Math.min(TOTAL_PAGES, Math.max(1, p))
+    if (clamped !== page) {
+      setFlipDir(clamped > page ? 1 : -1)
+      setPage(clamped)
+    }
   }
 
   /** تبديل علامة مرجعية للصفحة الحالية — تحديث تفاؤلي فوري */
@@ -650,7 +725,229 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
         </Card>
       )}
 
-      {/* أدوات التنقل */}
+      {/* شريط مصغّر — وضع مصحف المدينة: الصفحة أولاً والأدوات تنحسر */}
+      {mushafMode === "madani" && (
+        <div ref={topRef} className="scroll-mt-36">
+          <Card className="border-border/60 shadow-sm">
+            <CardContent className="p-2.5 sm:p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 shrink-0"
+                    disabled={page <= 1}
+                    onClick={() => goto(page - 1)}
+                    aria-label="الصفحة السابقة"
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </Button>
+                  <div className="min-w-0 grow text-center">
+                    <p className="text-sm font-extrabold tabular-nums">
+                      {arNum(page)} <span className="text-muted-foreground">/ {arNum(TOTAL_PAGES)}</span>
+                    </p>
+                    <p className="truncate text-[10px] text-muted-foreground">
+                      الجزء {arNum(data.juz)} • {data.surahLabel}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 shrink-0"
+                    disabled={page >= TOTAL_PAGES}
+                    onClick={() => goto(page + 1)}
+                    aria-label="الصفحة التالية"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </Button>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className={cn("h-10 w-10", bookmarks.includes(page) && "border-primary/50 text-primary")}
+                    onClick={toggleMark}
+                    disabled={markBusy}
+                    aria-pressed={bookmarks.includes(page)}
+                    aria-label={bookmarks.includes(page) ? "إزالة علامة هذه الصفحة" : "وضع علامة على هذه الصفحة"}
+                  >
+                    <Bookmark className={cn("h-5 w-5", bookmarks.includes(page) && "fill-primary text-primary")} />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-10 gap-1.5 px-3 text-xs"
+                    onClick={() => setMushafToolsOpen((o) => !o)}
+                    aria-expanded={mushafToolsOpen}
+                  >
+                    <Settings2 className="h-4 w-4" />
+                    أدوات
+                    <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-300", mushafToolsOpen && "rotate-180")} />
+                  </Button>
+                </div>
+              </div>
+
+              {/* لوحة الأدوات الكاملة — قابلة للطي في وضع الصور */}
+              {mushafToolsOpen && (
+                <div className="mt-3 space-y-3.5 border-t border-border/60 pt-3">
+                  {/* مبدّل نسخة المصحف */}
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <span className="shrink-0 text-[11px] font-extrabold text-muted-foreground">نسخة المصحف:</span>
+                    <div
+                      className="grid min-w-0 flex-1 grid-cols-2 gap-1 rounded-xl border border-border/70 bg-muted/40 p-1 sm:max-w-md"
+                      role="group"
+                      aria-label="اختيار نسخة المصحف"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => applyMushafMode("text")}
+                        aria-pressed={mushafMode === "text"}
+                        className={cn(
+                          "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-extrabold transition-all sm:text-xs",
+                          mushafMode === "text"
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <BookOpenText className="h-4 w-4 shrink-0" />
+                        نص عثماني تفاعلي
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyMushafMode("madani")}
+                        aria-pressed={mushafMode === "madani"}
+                        className={cn(
+                          "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-extrabold transition-all sm:text-xs",
+                          mushafMode === "madani"
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <Book className="h-4 w-4 shrink-0" />
+                        مصحف المدينة
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* شريط التنقل السريع */}
+                  <div className="flex items-center gap-3">
+                    <Slider
+                      value={[page]}
+                      onValueChange={(v) => goto(v[0])}
+                      min={1}
+                      max={TOTAL_PAGES}
+                      step={1}
+                      dir="ltr"
+                      className="flex-1"
+                      aria-label="شريط التنقل بين صفحات المصحف"
+                    />
+                    <Select value={String(page)} onValueChange={(v) => goto(Number(v))}>
+                      <SelectTrigger className="h-9 w-40 shrink-0 text-xs sm:w-52" aria-label="الانتقال إلى سورة">
+                        <SelectValue placeholder="انتقل إلى سورة" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        {SURAHS.map((s) => (
+                          <SelectItem key={s.n} value={String(s.page)} className="text-xs">
+                            {s.name} <span className="text-muted-foreground">— ص {arNum(s.page)}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* التلاوة + أنماط القراءة */}
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={audio.seqPlaying ? "default" : "outline"}
+                        className={cn("h-8 gap-1.5", audio.seqPlaying && "bg-emerald-600 hover:bg-emerald-700")}
+                        onClick={() => audio.togglePage(data.ayahs.map((a) => ({ key: a.key, s: a.s, n: a.n })))}
+                      >
+                        {audio.seqPlaying ? <Square className="h-3.5 w-3.5 fill-current" /> : <Headphones className="h-3.5 w-3.5" />}
+                        {audio.seqPlaying ? "إيقاف" : "استمع للصفحة"}
+                      </Button>
+                      <Select value={audio.qariId} onValueChange={audio.changeQari}>
+                        <SelectTrigger className="h-8 w-36 text-[11px]" aria-label="اختيار القارئ">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          {QARIS.map((q) => (
+                            <SelectItem key={q.id} value={q.id} className="text-xs">
+                              {q.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center rounded-lg border border-border/70 p-0.5" role="group" aria-label="نمط القراءة">
+                      {(
+                        [
+                          ["light", Sun, "عادي"],
+                          ["sepia", ScrollText, "ورقي"],
+                          ["night", MoonStar, "ليلي"],
+                        ] as const
+                      ).map(([m, Icon, label]) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => applyMode(m)}
+                          aria-pressed={mode === m}
+                          title={`نمط ${label} للصفحة المصوّرة`}
+                          className={cn(
+                            "flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-bold transition-all",
+                            mode === m
+                              ? "bg-primary text-primary-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">{label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* علاماتي المرجعية */}
+                  {bookmarks.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-2.5" dir="rtl">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-muted-foreground">
+                        <BookMarked className="h-3.5 w-3.5" />
+                        علاماتي:
+                      </span>
+                      <div className="scroll-thin flex max-w-full flex-wrap gap-1.5">
+                        {bookmarks.map((b) => (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => goto(b)}
+                            className={cn(
+                              "min-w-8 rounded-md border px-2 py-0.5 text-[11px] font-extrabold tabular-nums transition-all",
+                              b === page
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border/70 bg-muted/60 text-foreground hover:border-primary/50 hover:text-primary",
+                            )}
+                            title={`اذهب إلى صفحة ${b}`}
+                          >
+                            {arNum(b)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-[10px] leading-4 text-muted-foreground">
+                    التلاوة تحتاج اتصالاً أول مرة، ثم تُحفظ تلقائياً وتعمل دون إنترنت.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* أدوات التنقل — وضع النص التفاعلي */}
+      {mushafMode === "text" && (
       <div ref={topRef} className="scroll-mt-36 space-y-3">
         <Card className="border-border/60 shadow-sm">
           <CardContent className="space-y-3.5 p-3.5 sm:p-4">
@@ -889,51 +1186,44 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
           </CardContent>
         </Card>
       </div>
+      )}
 
-      {/* صفحة المصحف — من البيانات المحلية مباشرة */}
-      <Card
-        className={cn(
-          "animate-in fade-in-50 overflow-hidden border-2 shadow-md",
-          wird && page >= wird.from && page <= wird.to
-            ? "border-emerald-400/70 dark:border-emerald-600/60"
-            : "border-gold/40 dark:border-gold/25"
-        )}
-      >
-        <CardContent className="p-0">
-          {/* ترويسة الصفحة */}
-          <div
-            className={cn(
-              "border-b border-dashed px-4 py-3 text-center transition-colors",
-              MODES[mode].headerBorder,
-              MODES[mode].headerBg
-            )}
-          >
-            <p className={cn("text-xs font-extrabold", MODES[mode].headerText)}>
-              الجزء {arNum(data.juz)} • {data.surahLabel}
-            </p>
-          </div>
-
-          {/* متن الصفحة */}
-          <div className={cn("relative px-4 py-6 transition-colors sm:px-8", MODES[mode].pageBg)} dir="rtl">
-            {mushafMode === "madani" ? (
-              <div className="animate-in fade-in-50">
-                <MadaniPage
+      {/* ==================== عرض الصفحة ==================== */}
+      {mushafMode === "madani" ? (
+        /* الصفحة المصوّرة غامرة بلا كارد — هي البطل */
+        <div className="animate-in fade-in-50 px-1 py-2">
+          <MadaniPage
                   key={page}
                   n={page}
+                  mode={mode}
+                  dir={flipDir}
                   onOpen={() => {
                     setZoom(1)
                     setZoomOpen(true)
                   }}
-                  onSwipe={(dir) => setPage((p) => Math.min(TOTAL_PAGES, Math.max(1, p + dir)))}
+                  onSwipe={(dir) => goto(page + dir)}
                   onFallback={() => applyMushafMode("text")}
                 />
 
-                {/* بوابة التفسير والاستماع: آيات هذه الصفحة */}
-                <div className="mt-4 rounded-xl border border-border/70 bg-card/70 p-3">
-                  <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-extrabold text-muted-foreground">
-                    <BookOpenText className="h-3.5 w-3.5 text-primary" />
-                    آيات هذه الصفحة ({arNum(data.ayahs.length)}) — اضغط آية لتفسيرها والاستماع إليها
-                  </p>
+                {/* أدوات الصفحة: تفسير/متشابهات/استماع — قابلة للطي */}
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setToolsOpen((o) => !o)}
+                    aria-expanded={toolsOpen}
+                    className="flex w-full items-center justify-between gap-2 rounded-xl border border-gold/40 bg-gradient-to-l from-gold/10 via-gold/5 to-transparent px-4 py-2.5 text-right transition-all hover:border-gold/60 dark:border-gold/25"
+                  >
+                    <span className="flex items-center gap-2 text-xs font-extrabold text-amber-900 dark:text-gold">
+                      <BookOpenText className="h-4 w-4" />
+                      أدوات الصفحة: التفسير والمتشابهات والاستماع
+                      <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-bold tabular-nums">
+                        {arNum(data.ayahs.length)} آية
+                      </span>
+                    </span>
+                    <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-300", toolsOpen && "rotate-180")} />
+                  </button>
+                  {toolsOpen && (
+                  <div className="mt-2.5 space-y-3 rounded-xl border border-border/70 bg-card/70 p-3">
                   <div className="flex flex-wrap gap-1.5">
                     {data.ayahs.map((a) => {
                       const words = a.text.split(/\s+/)
@@ -994,7 +1284,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
 
                   {/* حفظ المصحف كاملاً (نسخة الويب) — في التطبيق الصور محلية أصلاً */}
                   {!isNative && (
-                    <div className="mt-3 border-t border-border/60 pt-3">
+                    <div className="border-t border-border/60 pt-3">
                       {dlProgress !== null ? (
                         <div className="space-y-1.5">
                           <p className="flex items-center justify-between text-[11px] font-bold text-muted-foreground">
@@ -1024,10 +1314,35 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                       )}
                     </div>
                   )}
+                  </div>
+                  )}
                 </div>
               </div>
             ) : (
-              <>
+              <Card
+                className={cn(
+                  "animate-in fade-in-50 overflow-hidden border-2 shadow-md",
+                  wird && page >= wird.from && page <= wird.to
+                    ? "border-emerald-400/70 dark:border-emerald-600/60"
+                    : "border-gold/40 dark:border-gold/25"
+                )}
+              >
+                <CardContent className="p-0">
+                  {/* ترويسة الصفحة */}
+                  <div
+                    className={cn(
+                      "border-b border-dashed px-4 py-3 text-center transition-colors",
+                      MODES[mode].headerBorder,
+                      MODES[mode].headerBg
+                    )}
+                  >
+                    <p className={cn("text-xs font-extrabold", MODES[mode].headerText)}>
+                      الجزء {arNum(data.juz)} • {data.surahLabel}
+                    </p>
+                  </div>
+
+                  {/* متن الصفحة */}
+                  <div className={cn("relative px-4 py-6 transition-colors sm:px-8", MODES[mode].pageBg)} dir="rtl">
             {data.sections.map((sec, si) => {
               const secAyahs = data.ayahs.filter((a) => a.s === sec.s && a.n >= sec.fromAyah && a.n <= sec.toAyah)
               return (
@@ -1151,9 +1466,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                 </div>
               </div>
             )}
-              </>
-            )}
-          </div>
+              </div>
 
           {/* تذييل الصفحة */}
           <div
@@ -1182,6 +1495,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
           </div>
         </CardContent>
       </Card>
+            )}
 
       {/* تلميح استخدام */}
       {!wird && (

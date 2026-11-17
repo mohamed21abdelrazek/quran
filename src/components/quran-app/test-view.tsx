@@ -770,16 +770,82 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
                           <span className="text-muted-foreground"> — {payloadOfTasmee?.surahLabel ?? ""}</span>
                         </p>
                         <p className="text-[11px] text-muted-foreground">
-                          الجزء {arNum(pageToJuz(tasmeePage))} • {pagesLabel(tasmeePage, tasmeePage)} — اكتب ما تحفظه
-                          بلا تشكيل، والصحيح يفهم قصدك
+                          الجزء {arNum(pageToJuz(tasmeePage))} • {pagesLabel(tasmeePage, tasmeePage)}
                         </p>
                       </div>
-                      <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => openMushaf(tasmeePage, "تسميع")}>
-                        <BookOpen className="h-3.5 w-3.5" />
-                        افتح في المصحف
-                      </Button>
+                      <div className="flex items-center gap-1.5">
+                        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => openMushaf(tasmeePage, "تسميع")}>
+                          <BookOpen className="h-3.5 w-3.5" />
+                          المصحف
+                        </Button>
+                      </div>
                     </div>
 
+                    {/* أوضاع التسميع: كتابي / صوتي / إخفاء */}
+                    <div className="grid grid-cols-3 gap-1 rounded-xl border border-border/70 bg-muted/40 p-1" role="group" aria-label="أوضاع التسميع">
+                      {(
+                        [
+                          ["write", PenLine, "كتابي"],
+                          ["voice", Mic, "صوتي"],
+                          ["hide", EyeOff, "إخفاء تدريجي"],
+                        ] as const
+                      ).map(([m, Icon, label]) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setTmode(m)}
+                          aria-pressed={tmode === m}
+                          className={cn(
+                            "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-extrabold transition-all sm:text-xs",
+                            tmode === m
+                              ? "bg-primary text-primary-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          <Icon className="h-4 w-4 shrink-0" />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {tmode === "voice" ? (
+                      backendMode === "offline" ? (
+                        <div className="space-y-2 rounded-xl border border-amber-300/60 bg-amber-50/60 p-4 text-center dark:border-amber-600/30 dark:bg-amber-950/20">
+                          <Mic className="mx-auto h-6 w-6 text-amber-600" />
+                          <p className="text-sm font-bold">التسميع الصوتي يحتاج اتصالاً بالإنترنت</p>
+                          <p className="text-xs leading-6 text-muted-foreground">
+                            أنت في النسخة الأوفلاين — استخدم التسميع الكتابي أو الإخفاء التدريجي (يعملان بلا إنترنت)،
+                            أو افتح نسخة الموقع للسمَّاع الصوتي.
+                          </p>
+                        </div>
+                      ) : (
+                        <TasmeeVoice
+                          key={tasmeePage}
+                          page={tasmeePage}
+                          payload={payloadOfTasmee}
+                          onAddMistakes={(r) => void addMistakesToHard(r)}
+                          onLog={(r, detail) => logTasmee(r, detail)}
+                          savingHard={savingHard}
+                        />
+                      )
+                    ) : tmode === "hide" ? (
+                      <HideDrill
+                        key={tasmeePage}
+                        page={tasmeePage}
+                        payload={payloadOfTasmee}
+                        onLog={(score, detail) =>
+                          action("/api/quiz", {
+                            kind: "tasmee",
+                            score,
+                            correct: Math.round(score / 10),
+                            total: 10,
+                            detail,
+                          }).then(() => load())
+                        }
+                        openMushaf={openMushaf}
+                      />
+                    ) : (
+                      <>
                     {/* مربع الكتابة */}
                     {!result && (
                       <div className="space-y-3">
@@ -804,80 +870,10 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
                       </div>
                     )}
 
-                    {/* النتيجة */}
+                    {/* النتيجة — العرض المشترك مع الصوتي */}
                     {result && (
                       <div className="space-y-4">
-                        <div className="flex flex-wrap items-center justify-center gap-4">
-                          <ProgressRing
-                            value={result.score}
-                            max={100}
-                            size={110}
-                            label={`${arNum(result.score)}٪`}
-                            sublabel="درجة التسميع"
-                          />
-                          <div className="space-y-1.5 text-xs">
-                            <p className="flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-300">
-                              <Check className="h-4 w-4" /> {arNum(result.counts.ok)} صحيحة
-                            </p>
-                            {result.counts.near > 0 && (
-                              <p className="text-amber-700 dark:text-amber-300">{arNum(result.counts.near)} قريبة — راجعها</p>
-                            )}
-                            {result.counts.wrong > 0 && (
-                              <p className="text-red-700 dark:text-red-400">{arNum(result.counts.wrong)} كلمة مكان أخرى</p>
-                            )}
-                            {result.counts.missing > 0 && (
-                              <p className="text-red-500">{arNum(result.counts.missing)} ساقطة</p>
-                            )}
-                            {result.counts.extra > 0 && (
-                              <p className="text-amber-600 dark:text-amber-400">{arNum(result.counts.extra)} زائدة</p>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* السطر المصحّح */}
-                        <div className="scroll-thin max-h-72 space-y-1.5 overflow-y-auto rounded-xl border border-border/70 bg-muted/40 p-3" dir="rtl">
-                          {(() => {
-                            let expIdx = 0
-                            return result.ops.map((op: AlignOp, i: number) => {
-                              let node: React.ReactNode = null
-                              if (op.type === "ok") {
-                                node = (
-                                  <span key={i} className={cn("font-quran text-lg", VERDICT_CLASS.ok)}>
-                                    {op.expected}{" "}
-                                  </span>
-                                )
-                              } else if (op.type === "near") {
-                                node = (
-                                  <span key={i} className={cn("font-quran text-lg", VERDICT_CLASS.near)} title={`قريبة (${Math.round((op.sim ?? 0) * 100)}٪) — الصواب: ${op.expected}`}>
-                                    {op.user}{" "}
-                                    <sup className="text-[10px]">({op.expected})</sup>{" "}
-                                  </span>
-                                )
-                              } else if (op.type === "wrong") {
-                                node = (
-                                  <span key={i} className="font-quran text-lg">
-                                    <span className="text-red-700 dark:text-red-400">{op.user}</span>
-                                    <sup className="text-[10px] text-emerald-700 dark:text-emerald-300"> الصواب: {op.expected}</sup>{" "}
-                                  </span>
-                                )
-                              } else if (op.type === "missing") {
-                                node = (
-                                  <span key={i} className={cn("font-quran text-lg", VERDICT_CLASS.missing)} title="ساقطة من التسميع">
-                                    [{op.expected}]{" "}
-                                  </span>
-                                )
-                              } else {
-                                node = (
-                                  <span key={i} className={cn("font-quran text-lg", VERDICT_CLASS.extra)} title="كلمة زائدة ليست في الآية">
-                                    {op.user}{" "}
-                                  </span>
-                                )
-                              }
-                              if (op.type !== "extra") expIdx++
-                              return node
-                            })
-                          })()}
-                        </div>
+                        <TasmeeResultView result={result} />
 
                         {/* أزرار ما بعد التصحيح */}
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -887,7 +883,7 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
                                 size="sm"
                                 variant="outline"
                                 className="h-9 gap-1.5"
-                                onClick={addMistakesToHard}
+                                onClick={() => void addMistakesToHard(result)}
                                 disabled={savingHard}
                               >
                                 {savingHard ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Tag className="h-3.5 w-3.5" />}
@@ -912,6 +908,8 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
                   </>
                 )}
               </>
+            )}
+          </>
             )}
           </CardContent>
         </Card>
