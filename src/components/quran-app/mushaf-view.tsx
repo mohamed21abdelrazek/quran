@@ -41,6 +41,9 @@ import {
   Landmark,
   Tag,
   AlertTriangle,
+  Book,
+  Maximize2,
+  Download,
 } from "lucide-react"
 import { SURAHS, TOTAL_PAGES, pageToJuz, pagesLabel } from "@/lib/quran"
 import { BISMILLAH, getNextAyahText, getPagePayload } from "@/lib/mushaf-data"
@@ -152,6 +155,16 @@ type ReadingMode = "light" | "sepia" | "night"
 const MODE_LS_KEY = "wardi:readingMode"
 const LASTREAD_LS_KEY = "wardi:lastRead"
 
+// ==================== نسخة المصحف ====================
+
+type MushafMode = "text" | "madani"
+const MUSHAF_LS_KEY = "wardi:mushafMode"
+
+/** مسار صورة صفحة من مصحف المدينة المنورة (طبعة مجمع الملك فهد) */
+function madaniPageUrl(n: number): string {
+  return `/mushaf/madani/page${String(n).padStart(3, "0")}.png`
+}
+
 const MODES: Record<
   ReadingMode,
   {
@@ -236,11 +249,96 @@ const MODES: Record<
 let lastPageVisited = 1
 let lastFontScale = 1
 
+// ==================== صفحة مصحف المدينة (صورة) ====================
+
+interface MadaniPageProps {
+  n: number
+  /** فتح العارض المكبّر */
+  onOpen: () => void
+  /** سحب أفقي: ١ = الصفحة التالية، -١ = السابقة */
+  onSwipe: (dir: 1 | -1) => void
+  /** التعذر — العودة للنص التفاعلي */
+  onFallback: () => void
+}
+
+/** صورة صفحة حقيقية من مصحف المدينة — محمّلة من ملفات التطبيق محلياً.
+ *  يُعاد تركيبها مع كل صفحة (key) — فلا حاجة لإعادة ضبط حالة التحميل */
+function MadaniPage({ n, onOpen, onSwipe, onFallback }: MadaniPageProps) {
+  const [loaded, setLoaded] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+
+  return (
+    <div
+      className="relative mx-auto w-full max-w-2xl touch-pan-y select-none"
+      onTouchStart={(e) => {
+        const t = e.touches[0]
+        touchStart.current = { x: t.clientX, y: t.clientY }
+      }}
+      onTouchEnd={(e) => {
+        const s = touchStart.current
+        if (!s) return
+        touchStart.current = null
+        const t = e.changedTouches[0]
+        const dx = t.clientX - s.x
+        const dy = t.clientY - s.y
+        if (Math.abs(dx) >= 60 && Math.abs(dy) <= 50) onSwipe(dx < 0 ? 1 : -1)
+      }}
+    >
+      <div
+        className="relative overflow-hidden rounded-lg border-2 border-gold/50 bg-white shadow-md dark:border-gold/25"
+        style={{ aspectRatio: "1260 / 2038" }}
+      >
+        {!loaded && !failed && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-muted/70">
+            <Loader2 className="h-6 w-6 animate-spin text-primary/70" />
+            <p className="text-[11px] font-extrabold text-muted-foreground">جارٍ فتح الصفحة {arNum(n)}…</p>
+          </div>
+        )}
+        {failed ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-muted p-6 text-center">
+            <AlertTriangle className="h-8 w-8 text-amber-500" />
+            <p className="text-sm font-bold text-foreground">تعذّر عرض صورة هذه الصفحة</p>
+            <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onFallback}>
+              <BookOpenText className="h-3.5 w-3.5" />
+              التبديل للنص العثماني
+            </Button>
+          </div>
+        ) : (
+          <img
+            key={n}
+            src={madaniPageUrl(n)}
+            alt={`صفحة ${arNum(n)} من مصحف المدينة المنورة — الجزء ${arNum(pageToJuz(n))}`}
+            onLoad={() => setLoaded(true)}
+            onError={() => setFailed(true)}
+            onClick={onOpen}
+            draggable={false}
+            className={cn(
+              "h-full w-full cursor-zoom-in bg-white object-contain transition-opacity duration-300 dark:brightness-[0.85]",
+              loaded ? "opacity-100" : "opacity-0",
+            )}
+          />
+        )}
+      </div>
+      <p className="mt-2 text-center text-[10px] font-bold text-muted-foreground">
+        اضغط الصورة للتكبير • اسحب يميناً أو يساراً لتقليب الصفحات
+      </p>
+    </div>
+  )
+}
+
 export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
   const [page, setPage] = useState<number>(wird?.from ?? lastPageVisited)
   const [focusKey, setFocusKey] = useState<string | null>(null)
   const [fontScale, setFontScale] = useState(lastFontScale)
   const [mode, setMode] = useState<ReadingMode>("light")
+  // نسخة المصحف: نص عثماني تفاعلي أو مصحف المدينة بالصور
+  const [mushafMode, setMushafMode] = useState<MushafMode>("madani")
+  const [zoomOpen, setZoomOpen] = useState(false)
+  const [zoom, setZoom] = useState(1)
+  // تقدم حفظ صور المصحف كاملة (نسخة الويب)
+  const [dlProgress, setDlProgress] = useState<number | null>(null)
+  const [isNative] = useState(() => typeof window !== "undefined" && "Capacitor" in window)
   // بطاقة الآية: التفسير وأسباب النزول وتعليم الكلمات الصعبة
   const [cardKey, setCardKey] = useState<string | null>(null)
   const [cardData, setCardData] = useState<
@@ -292,6 +390,8 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
       try {
         const m = localStorage.getItem(MODE_LS_KEY)
         if (m === "light" || m === "sepia" || m === "night") setMode(m)
+        const mm = localStorage.getItem(MUSHAF_LS_KEY)
+        if (mm === "text" || mm === "madani") setMushafMode(mm)
         if (!wird) {
           const last = Number(localStorage.getItem(LASTREAD_LS_KEY))
           if (last >= 1 && last <= TOTAL_PAGES) setPage(last)
@@ -336,6 +436,17 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [page, focusKey])
+
+  // تحميل مسبق لصفحتي الجوار — تقليب فوري في وضع الصور
+  useEffect(() => {
+    if (mushafMode !== "madani") return
+    for (const p of [page - 1, page + 1]) {
+      if (p >= 1 && p <= TOTAL_PAGES) {
+        const img = new window.Image()
+        img.src = madaniPageUrl(p)
+      }
+    }
+  }, [page, mushafMode])
 
   const surahName = (s: number) => SURAHS[s - 1]?.name ?? ""
 
@@ -429,6 +540,41 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
     } catch {
       /* تجاهل */
     }
+  }
+
+  const applyMushafMode = (m: MushafMode) => {
+    setMushafMode(m)
+    try {
+      localStorage.setItem(MUSHAF_LS_KEY, m)
+    } catch {
+      /* تجاهل */
+    }
+  }
+
+  /** حفظ صور المصحف الـ٦٠٤ في ذاكرة الجهاز — لتصفح كامل بلا إنترنت (نسخة الويب) */
+  const downloadAllPages = async () => {
+    if (dlProgress !== null) return
+    setDlProgress(0)
+    let done = 0
+    for (let i = 1; i <= TOTAL_PAGES; i += 8) {
+      const batch = Array.from({ length: Math.min(8, TOTAL_PAGES - i + 1) }, (_, k) => i + k)
+      await Promise.all(
+        batch.map(async (p) => {
+          try {
+            await fetch(madaniPageUrl(p))
+          } catch {
+            /* تجاهل — ما حُفظ سابقاً يبقى */
+          }
+          done++
+        }),
+      )
+      setDlProgress(Math.round((done / TOTAL_PAGES) * 100))
+    }
+    setDlProgress(null)
+    toast({
+      title: "حُفظ المصحف كاملاً على جهازك",
+      description: "تصفح الصفحات الـ٦٠٤ الآن بلا إنترنت",
+    })
   }
 
   return (
@@ -543,27 +689,29 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
               </div>
 
               <div className="flex items-center gap-1.5">
-                <div className="flex items-center rounded-lg border border-border/70">
-                  <button
-                    type="button"
-                    className="px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-                    disabled={fontScale <= 1}
-                    onClick={() => applyFontScale(Math.max(1, fontScale - 1))}
-                    aria-label="تصغير الخط"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </button>
-                  <span className="px-1 text-[10px] font-bold text-muted-foreground">الخط</span>
-                  <button
-                    type="button"
-                    className="px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-                    disabled={fontScale >= 3}
-                    onClick={() => applyFontScale(Math.min(3, fontScale + 1))}
-                    aria-label="تكبير الخط"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                </div>
+                {mushafMode === "text" && (
+                  <div className="flex items-center rounded-lg border border-border/70">
+                    <button
+                      type="button"
+                      className="px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                      disabled={fontScale <= 1}
+                      onClick={() => applyFontScale(Math.max(1, fontScale - 1))}
+                      aria-label="تصغير الخط"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <span className="px-1 text-[10px] font-bold text-muted-foreground">الخط</span>
+                    <button
+                      type="button"
+                      className="px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                      disabled={fontScale >= 3}
+                      onClick={() => applyFontScale(Math.min(3, fontScale + 1))}
+                      aria-label="تكبير الخط"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
                 <Button
                   variant="outline"
                   size="icon"
@@ -605,6 +753,47 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                 className="flex-1"
                 aria-label="شريط التنقل بين صفحات المصحف"
               />
+            </div>
+
+            {/* اختيار نسخة المصحف */}
+            <div className="flex flex-wrap items-center gap-2.5 border-t border-border/60 pt-3">
+              <span className="shrink-0 text-[11px] font-extrabold text-muted-foreground">نسخة المصحف:</span>
+              <div
+                className="grid min-w-0 flex-1 grid-cols-2 gap-1 rounded-xl border border-border/70 bg-muted/40 p-1 sm:max-w-md"
+                role="group"
+                aria-label="اختيار نسخة المصحف"
+              >
+                <button
+                  type="button"
+                  onClick={() => applyMushafMode("text")}
+                  aria-pressed={mushafMode === "text"}
+                  title="نص عثماني تفاعلي — التفسير والمتشابهات مباشرة على الكلمات"
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-extrabold transition-all sm:text-xs",
+                    mushafMode === "text"
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <BookOpenText className="h-4 w-4 shrink-0" />
+                  نص عثماني تفاعلي
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyMushafMode("madani")}
+                  aria-pressed={mushafMode === "madani"}
+                  title="مصحف المدينة المنورة — طبعة مجمع الملك فهد بالصور"
+                  className={cn(
+                    "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-extrabold transition-all sm:text-xs",
+                    mushafMode === "madani"
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Book className="h-4 w-4 shrink-0" />
+                  مصحف المدينة
+                </button>
+              </div>
             </div>
 
             {/* علاماتي المرجعية */}
@@ -726,6 +915,119 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
 
           {/* متن الصفحة */}
           <div className={cn("relative px-4 py-6 transition-colors sm:px-8", MODES[mode].pageBg)} dir="rtl">
+            {mushafMode === "madani" ? (
+              <div className="animate-in fade-in-50">
+                <MadaniPage
+                  key={page}
+                  n={page}
+                  onOpen={() => {
+                    setZoom(1)
+                    setZoomOpen(true)
+                  }}
+                  onSwipe={(dir) => setPage((p) => Math.min(TOTAL_PAGES, Math.max(1, p + dir)))}
+                  onFallback={() => applyMushafMode("text")}
+                />
+
+                {/* بوابة التفسير والاستماع: آيات هذه الصفحة */}
+                <div className="mt-4 rounded-xl border border-border/70 bg-card/70 p-3">
+                  <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-extrabold text-muted-foreground">
+                    <BookOpenText className="h-3.5 w-3.5 text-primary" />
+                    آيات هذه الصفحة ({arNum(data.ayahs.length)}) — اضغط آية لتفسيرها والاستماع إليها
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {data.ayahs.map((a) => {
+                      const words = a.text.split(/\s+/)
+                      const preview = words.slice(0, 3).join(" ")
+                      const isPlaying = audio.playingKey === a.key
+                      return (
+                        <button
+                          key={a.key}
+                          type="button"
+                          onClick={() => setCardKey(a.key)}
+                          title={`${surahName(a.s)} — الآية ${arNum(a.n)}${a.groups.length > 0 ? " (لها متشابهات)" : ""}`}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 transition-all",
+                            isPlaying
+                              ? "border-emerald-400/70 bg-emerald-100 dark:bg-emerald-900/50"
+                              : "border-border/70 bg-background hover:border-primary/50 hover:shadow-sm",
+                          )}
+                        >
+                          <span className="font-quran text-sm leading-6 text-foreground">
+                            {preview}
+                            {words.length > 3 ? "…" : ""}
+                          </span>
+                          <span className="rounded-full bg-primary/10 px-1.5 text-[10px] font-extrabold tabular-nums text-primary">
+                            {arNum(a.n)}
+                          </span>
+                          {a.groups.length > 0 && <Scale className="h-3 w-3 text-amber-600 dark:text-amber-400" />}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {/* المتشابهات في الصفحة — كما هي في النص التفاعلي */}
+                  {data.mutashabihat.length > 0 && (
+                    <div className={cn("mt-3 rounded-xl border border-dashed p-3", MODES[mode].summaryBox)}>
+                      <p className={cn("mb-2 flex items-center gap-1.5 text-[11px] font-bold", MODES[mode].summaryText)}>
+                        <Layers className="h-3.5 w-3.5" />
+                        متشابهات هذه الصفحة: {arNum(data.mutashabihat.length)} مجموعة
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {data.ayahs
+                          .filter((a) => a.groups.length > 0)
+                          .map((a) => (
+                            <button
+                              key={a.key}
+                              type="button"
+                              onClick={() => setFocusKey(a.key)}
+                              className={cn(
+                                "rounded-md border px-2 py-0.5 text-[10px] font-bold transition-colors",
+                                MODES[mode].summaryChip,
+                              )}
+                            >
+                              {surahName(a.s)} {arNum(a.n)}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* حفظ المصحف كاملاً (نسخة الويب) — في التطبيق الصور محلية أصلاً */}
+                  {!isNative && (
+                    <div className="mt-3 border-t border-border/60 pt-3">
+                      {dlProgress !== null ? (
+                        <div className="space-y-1.5">
+                          <p className="flex items-center justify-between text-[11px] font-bold text-muted-foreground">
+                            <span className="inline-flex items-center gap-1.5">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                              حفظ صفحات المصحف على جهازك…
+                            </span>
+                            <span className="tabular-nums">{arNum(dlProgress)}٪</span>
+                          </p>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-primary transition-all"
+                              style={{ width: `${dlProgress}%` }}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 w-full gap-1.5 sm:w-auto"
+                          onClick={downloadAllPages}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          حفظ المصحف كاملاً للعمل بلا إنترنت
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
             {data.sections.map((sec, si) => {
               const secAyahs = data.ayahs.filter((a) => a.s === sec.s && a.n >= sec.fromAyah && a.n <= sec.toAyah)
               return (
@@ -849,6 +1151,8 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                 </div>
               </div>
             )}
+              </>
+            )}
           </div>
 
           {/* تذييل الصفحة */}
@@ -883,7 +1187,9 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
       {!wird && (
         <p className="flex items-center justify-center gap-1.5 text-center text-[11px] leading-5 text-muted-foreground">
           <MousePointerClick className="h-3.5 w-3.5 shrink-0" />
-          استخدم الأسهم للتنقل — اضغط على آية لتفسيرها وأسباب نزولها، وزر «متشابهات» يعرض نظائرها مع إبراز الفرق
+          {mushafMode === "madani"
+            ? "اضغط الصورة للتكبير — واضغط أي آية في لوحة «آيات الصفحة» لتفسيرها ومتشابهاتها والاستماع إليها"
+            : "استخدم الأسهم للتنقل — اضغط على آية لتفسيرها وأسباب نزولها، وزر «متشابهات» يعرض نظائرها مع إبراز الفرق"}
         </p>
       )}
 
@@ -1228,6 +1534,78 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
               </>
             )
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* عارض صفحة مصحف المدينة مكبّرة */}
+      <Dialog
+        open={zoomOpen}
+        onOpenChange={(o) => {
+          setZoomOpen(o)
+          if (o) setZoom(1)
+        }}
+      >
+        <DialogContent className="max-h-[92vh] gap-0 sm:max-w-4xl" dir="rtl">
+          <DialogHeader className="text-right">
+            <DialogTitle className="flex flex-wrap items-center gap-2 text-base">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                <Book className="h-4 w-4" />
+              </span>
+              مصحف المدينة — صفحة {arNum(page)}
+              <span className="text-xs font-medium text-muted-foreground">
+                الجزء {arNum(data.juz)} • {data.surahLabel}
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={zoom <= 1}
+                onClick={() => setZoom((z) => Math.max(1, Math.round((z - 0.25) * 100) / 100))}
+                aria-label="تصغير الصورة"
+              >
+                <Minus className="h-4 w-4" />
+              </Button>
+              <span className="w-12 text-center text-xs font-extrabold tabular-nums">
+                {arNum(Math.round(zoom * 100))}٪
+              </span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={zoom >= 3}
+                onClick={() => setZoom((z) => Math.min(3, Math.round((z + 0.25) * 100) / 100))}
+                aria-label="تكبير الصورة"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-[11px]" onClick={() => setZoom(1)}>
+                <Maximize2 className="h-3.5 w-3.5" />
+                ملاءمة
+              </Button>
+            </div>
+            <p className="text-[10px] leading-4 text-muted-foreground">
+              اضغط على الصورة مرتين للتكبير والتصغير — اسحب داخلها للتجوال
+            </p>
+          </div>
+
+          <div
+            className="scroll-thin max-h-[64vh] overflow-auto rounded-lg border-2 border-gold/50 bg-white dark:border-gold/25 dark:bg-black/50"
+            dir="rtl"
+          >
+            <img
+              src={madaniPageUrl(page)}
+              alt={`صفحة ${arNum(page)} مكبّرة من مصحف المدينة المنورة`}
+              onDoubleClick={() => setZoom((z) => (z === 1 ? 2 : 1))}
+              draggable={false}
+              className="block min-w-full select-none"
+              style={{ width: `${zoom * 100}%` }}
+            />
+          </div>
         </DialogContent>
       </Dialog>
     </div>

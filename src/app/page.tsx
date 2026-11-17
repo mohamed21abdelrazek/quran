@@ -47,7 +47,8 @@ function ThemeToggle() {
 
 export default function Page() {
   const { state, loading, error, offline, load, action, patchTask } = useApp()
-  const [view, setView] = useState<View>("today")
+  // المصحف هو الواجهة الأساسية — الحفظ يعتمد على ذاكرة الصور وأماكن الآيات
+  const [view, setView] = useState<View>("mushaf")
   const [refreshing, setRefreshing] = useState(false)
   const [wird, setWird] = useState<WirdTarget | null>(null)
 

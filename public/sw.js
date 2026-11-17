@@ -109,6 +109,12 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
+  // صفحات مصحف المدينة المصوّرة: كاش أولاً — بعد أول فتح تعمل بلا إنترنت
+  if (url.pathname.startsWith("/mushaf/")) {
+    event.respondWith(cacheFirst(req))
+    return
+  }
+
   // خارج النطاق وغير ذلك: نتركه للمتصفح
   if (url.origin !== self.location.origin) return
 
