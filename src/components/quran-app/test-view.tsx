@@ -9,7 +9,11 @@ import { ProgressRing } from "./progress-ring"
 import { fireConfetti } from "@/hooks/use-app"
 import { getPagePayload, getNextAyahText } from "@/lib/mushaf-data"
 import { SURAHS, pageToJuz, pagesLabel, TOTAL_PAGES } from "@/lib/quran"
-import { gradeTasmee, normalizeWord, VERDICT_CLASS, type TasmeeResult, type AlignOp } from "@/lib/tasmee"
+import { gradeTasmee, normalizeWord, type TasmeeResult, type AlignOp } from "@/lib/tasmee"
+import { backendMode } from "@/lib/client-backend/entry"
+import { TasmeeResultView } from "./tasmee-result-view"
+import { TasmeeVoice } from "./tasmee-voice"
+import { HideDrill } from "./hide-drill"
 import type { AppState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
@@ -32,6 +36,8 @@ import {
   BookOpen,
   AlertTriangle,
   Layers,
+  Mic,
+  EyeOff,
 } from "lucide-react"
 
 // ==================== أنواع ====================
@@ -230,6 +236,8 @@ function ayahSpansOf(page: number): { spans: AyahSpan[]; ayahByKey: Map<string, 
 export function TestView({ state, load, action, openMushaf }: ViewProps) {
   const { toast } = useToast()
   const [tab, setTab] = useState<"cards" | "tasmee" | "hard">("cards")
+  // أوضاع التسميع: كتابي / صوتي / إخفاء تدريجي
+  const [tmode, setTmode] = useState<"write" | "voice" | "hide">("write")
 
   // ---- جلسة البطاقات ----
   const [cards, setCards] = useState<QuizCard[] | null>(null)
@@ -353,14 +361,14 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
     return r
   }
 
-  const logTasmee = async (r: TasmeeResult) => {
+  const logTasmee = async (r: TasmeeResult, detail?: string) => {
     try {
       await action("/api/quiz", {
         kind: "tasmee",
         score: r.score,
         correct: r.counts.ok,
         total: r.expectedCount,
-        detail: tasmeePage ? `تسميع صفحة ${tasmeePage}` : "تسميع",
+        detail: detail ?? (tasmeePage ? `تسميع صفحة ${tasmeePage}` : "تسميع"),
       })
       if (r.score === 100) fireConfetti()
       toast({
@@ -379,13 +387,14 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
   }
 
   /** إضافة كل الكلمات الخاطئة/الساقطة للقائمة الصعبة */
-  const addMistakesToHard = async () => {
-    if (!result || !spansInfo || !tasmeePage) return
+  const addMistakesToHard = async (r?: TasmeeResult) => {
+    const res = r ?? result
+    if (!res || !spansInfo || !tasmeePage) return
     setSavingHard(true)
     let added = 0
     let expIdx = 0
     const seen = new Set<string>()
-    for (const op of result.ops) {
+    for (const op of res.ops) {
       if (op.type === "extra") continue
       const span = spansInfo.spans.find((sp) => expIdx >= sp.start && expIdx < sp.start + sp.len)
       expIdx++
