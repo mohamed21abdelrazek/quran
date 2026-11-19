@@ -172,6 +172,30 @@
   box-shadow: 0 8px 30px -8px color-mix(in oklch, var(--primary) 45%, transparent);
 }
 
+/* ==================== أعمدة الصوت المتحركة (المشغل والتسميع اللحظي) ==================== */
+
+@keyframes eq-pulse {
+  0%, 100% { transform: scaleY(0.25); }
+  35% { transform: scaleY(1); }
+  70% { transform: scaleY(0.55); }
+}
+
+.eq-bar {
+  height: 100%;
+  transform-origin: bottom;
+  transform: scaleY(0.25);
+  transition: transform 0.3s ease;
+}
+
+.eq-bar.eq-on {
+  animation: eq-pulse 0.9s ease-in-out infinite;
+}
+
+/* احترام تقليل الحركة */
+@media (prefers-reduced-motion: reduce) {
+  .eq-bar.eq-on { animation: none; transform: scaleY(0.6); }
+}
+
 /* ==================== خطوط محلية (تعمل أوفلاين — لا اعتماد على جوجل) ==================== */
 
 

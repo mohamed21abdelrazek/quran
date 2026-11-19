@@ -14,6 +14,7 @@ import { backendMode } from "@/lib/client-backend/entry"
 import { TasmeeResultView } from "./tasmee-result-view"
 import { TasmeeVoice } from "./tasmee-voice"
 import { HideDrill } from "./hide-drill"
+import { TarteelLive, type HardWordItem } from "./tarteel-live"
 import type { AppState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
@@ -38,6 +39,7 @@ import {
   Layers,
   Mic,
   EyeOff,
+  Radio,
 } from "lucide-react"
 
 // ==================== أنواع ====================
@@ -237,7 +239,7 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
   const { toast } = useToast()
   const [tab, setTab] = useState<"cards" | "tasmee" | "hard">("cards")
   // أوضاع التسميع: كتابي / صوتي / إخفاء تدريجي
-  const [tmode, setTmode] = useState<"write" | "voice" | "hide">("write")
+  const [tmode, setTmode] = useState<"write" | "voice" | "hide" | "live">("write")
 
   // ---- جلسة البطاقات ----
   const [cards, setCards] = useState<QuizCard[] | null>(null)
@@ -424,6 +426,36 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
       await load()
     } else {
       toast({ title: "لا كلمات خاطئة لإضافتها" })
+    }
+  }
+
+  /** إضافة كلمات مواضع المراجعة (الوضع اللحظي) للقائمة الصعبة */
+  const addLiveMistakesToHard = async (items: HardWordItem[]) => {
+    if (!tasmeePage) return
+    setSavingHard(true)
+    let added = 0
+    const seen = new Set<string>()
+    for (const it of items) {
+      if (seen.has(`${it.key}:${it.word}`)) continue
+      seen.add(`${it.key}:${it.word}`)
+      try {
+        await action("/api/difficult", {
+          action: "add",
+          key: it.key,
+          word: it.word,
+          surah: it.s,
+          ayah: it.n,
+          page: tasmeePage,
+        })
+        added++
+      } catch {
+        /* نتابع البقية */
+      }
+    }
+    setSavingHard(false)
+    if (added > 0) {
+      toast({ title: "أُضيفت للقائمة الصعبة", description: `${arNum(added)} موضعاً ستراه في «قائمتي الصعبة»` })
+      await load()
     }
   }
 
@@ -782,12 +814,13 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
                     </div>
 
                     {/* أوضاع التسميع: كتابي / صوتي / إخفاء */}
-                    <div className="grid grid-cols-3 gap-1 rounded-xl border border-border/70 bg-muted/40 p-1" role="group" aria-label="أوضاع التسميع">
+                    <div className="grid grid-cols-2 gap-1 rounded-xl border border-border/70 bg-muted/40 p-1 sm:grid-cols-4" role="group" aria-label="أوضاع التسميع">
                       {(
                         [
                           ["write", PenLine, "كتابي"],
                           ["voice", Mic, "صوتي"],
                           ["hide", EyeOff, "إخفاء تدريجي"],
+                          ["live", Radio, "ترتيل لحظي"],
                         ] as const
                       ).map(([m, Icon, label]) => (
                         <button
@@ -825,6 +858,34 @@ export function TestView({ state, load, action, openMushaf }: ViewProps) {
                           payload={payloadOfTasmee}
                           onAddMistakes={(r) => void addMistakesToHard(r)}
                           onLog={(r, detail) => logTasmee(r, detail)}
+                          savingHard={savingHard}
+                        />
+                      )
+                    ) : tmode === "live" ? (
+                      backendMode === "offline" ? (
+                        <div className="space-y-2 rounded-xl border border-amber-300/60 bg-amber-50/60 p-4 text-center dark:border-amber-600/30 dark:bg-amber-950/20">
+                          <Radio className="mx-auto h-6 w-6 text-amber-600" />
+                          <p className="text-sm font-bold">الترتيل اللحظي يحتاج اتصالاً بالإنترنت</p>
+                          <p className="text-xs leading-6 text-muted-foreground">
+                            التفريغ اللحظي يجري في السحابة — استخدم الكتابي أو الإخفاء أوفلاين، أو افتح نسخة الموقع.
+                          </p>
+                        </div>
+                      ) : (
+                        <TarteelLive
+                          key={tasmeePage}
+                          page={tasmeePage}
+                          payload={payloadOfTasmee}
+                          onLog={(score, detail) =>
+                            action("/api/quiz", {
+                              kind: "tasmee",
+                              score,
+                              correct: Math.round(score / 10),
+                              total: 10,
+                              detail,
+                            }).then(() => load())
+                          }
+                          onAddHardWords={(items) => addLiveMistakesToHard(items)}
+                          openMushaf={openMushaf}
                           savingHard={savingHard}
                         />
                       )

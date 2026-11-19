@@ -46,7 +46,9 @@ import {
   Download,
   ChevronDown,
   Settings2,
+  Palette,
 } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { SURAHS, TOTAL_PAGES, pageToJuz, pagesLabel } from "@/lib/quran"
 import { BISMILLAH, getNextAyahText, getPagePayload } from "@/lib/mushaf-data"
 import type { AyahRef } from "@/lib/mushaf-data"
@@ -55,6 +57,9 @@ import type { AppState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useAyahAudio } from "@/hooks/use-ayah-audio"
 import { QARIS } from "@/lib/audio"
+import { getTajweedAyah, TAJWEED_LEGEND, TAJWEED_RULES } from "@/lib/tajweed"
+import { TajweedWord, TajweedWords } from "./tajweed-text"
+import { AudioPlayerBar } from "./audio-player-bar"
 import { useToast } from "@/hooks/use-toast"
 
 // ==================== أنواع ====================
@@ -161,6 +166,9 @@ const LASTREAD_LS_KEY = "wardi:lastRead"
 
 type MushafMode = "text" | "madani"
 const MUSHAF_LS_KEY = "wardi:mushafMode"
+
+/** التجويد الملوّن — تشغيل/إيقاف تلوين أحكام التجويد في النص التفاعلي */
+const TAJWEED_LS_KEY = "wardi:tajweed"
 
 /** مسار صورة صفحة من مصحف المدينة المنورة (طبعة مجمع الملك فهد) */
 function madaniPageUrl(n: number): string {
@@ -393,6 +401,8 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
   const [mode, setMode] = useState<ReadingMode>("light")
   // نسخة المصحف: نص عثماني تفاعلي أو مصحف المدينة بالصور
   const [mushafMode, setMushafMode] = useState<MushafMode>("madani")
+  // التجويد الملوّن في النص التفاعلي — مفعّل افتراضياً
+  const [tajweed, setTajweed] = useState(true)
   const [zoomOpen, setZoomOpen] = useState(false)
   const [zoom, setZoom] = useState(1)
   // تقدم حفظ صور المصحف كاملة (نسخة الويب)
@@ -416,6 +426,13 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
   // المصحف كامل داخل التطبيق — بلا أي طلب شبكة، يعمل أوفلاين
   // (قبل كل التأثيرات: تقييم مصفوفات الاعتماديات في نفس الاستدعاء)
   const data = getPagePayload(page)
+
+  // بيانات التجويد الملوّن لآيات الصفحة (كلمات بمقاطع موسومة)
+  const tajweedAyahs = useMemo(() => {
+    const out: Record<string, ReturnType<typeof getTajweedAyah>> = {}
+    if (data) for (const a of data.ayahs) out[a.key] = getTajweedAyah(a.key)
+    return out
+  }, [data])
 
   const topRef = useRef<HTMLDivElement>(null)
   const restoredRef = useRef(false)
@@ -455,6 +472,8 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
         if (m === "light" || m === "sepia" || m === "night") setMode(m)
         const mm = localStorage.getItem(MUSHAF_LS_KEY)
         if (mm === "text" || mm === "madani") setMushafMode(mm)
+        const tj = localStorage.getItem(TAJWEED_LS_KEY)
+        if (tj === "0") setTajweed(false)
         if (!wird) {
           const last = Number(localStorage.getItem(LASTREAD_LS_KEY))
           if (last >= 1 && last <= TOTAL_PAGES) setPage(last)
@@ -626,6 +645,15 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
     }
   }
 
+  const applyTajweed = (on: boolean) => {
+    setTajweed(on)
+    try {
+      localStorage.setItem(TAJWEED_LS_KEY, on ? "1" : "0")
+    } catch {
+      /* تجاهل */
+    }
+  }
+
   /** حفظ صور المصحف الـ٦٠٤ في ذاكرة الجهاز — لتصفح كامل بلا إنترنت (نسخة الويب) */
   const downloadAllPages = async () => {
     if (dlProgress !== null) return
@@ -724,6 +752,47 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* استئناف التلاوة من حيث توقفت */}
+      {audio.savedPosition && !audio.playingKey && (() => {
+        const sv = audio.savedPosition
+        const sameQari = sv.qariId === audio.qariId
+        return (
+          <div className="animate-in fade-in-50 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-300/60 bg-emerald-50/70 px-3 py-2 dark:border-emerald-600/30 dark:bg-emerald-950/25" dir="rtl">
+            <Play className="h-4 w-4 shrink-0 fill-emerald-600 text-emerald-600 dark:text-emerald-400" />
+            <p className="min-w-0 flex-1 text-[11px] font-bold leading-5 text-emerald-900 dark:text-emerald-200">
+              توقفت عند {SURAHS[sv.s - 1]?.name} {arNum(sv.n)} — ص {arNum(sv.page)} • {arNum(audio.fmtTime(sv.time))}
+              {!sameQari && <span className="text-muted-foreground"> (ستبدأ الآية من جديد بقارئك الحالي)</span>}
+            </p>
+            <Button
+              size="sm"
+              className="h-8 gap-1 bg-emerald-600 hover:bg-emerald-700"
+              onClick={() => {
+                const payload = getPagePayload(sv.page)
+                if (!payload) return
+                goto(sv.page)
+                audio.resume(
+                  payload.ayahs.map((a) => ({ key: a.key, s: a.s, n: a.n })),
+                  sv.page,
+                  sameQari ? sv : { ...sv, time: 0 },
+                )
+              }}
+            >
+              <Play className="h-3.5 w-3.5 fill-current" />
+              استئناف
+            </Button>
+            <button
+              type="button"
+              onClick={audio.clearSaved}
+              className="rounded-md p-1 text-emerald-700/70 transition-colors hover:bg-emerald-100 dark:text-emerald-300/70 dark:hover:bg-emerald-900/40"
+              aria-label="نسيان موضع التلاوة"
+              title="نسيان الموضع"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )
+      })()}
 
       {/* شريط مصغّر — وضع مصحف المدينة: الصفحة أولاً والأدوات تنحسر */}
       {mushafMode === "madani" && (
@@ -862,7 +931,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                         size="sm"
                         variant={audio.seqPlaying ? "default" : "outline"}
                         className={cn("h-8 gap-1.5", audio.seqPlaying && "bg-emerald-600 hover:bg-emerald-700")}
-                        onClick={() => audio.togglePage(data.ayahs.map((a) => ({ key: a.key, s: a.s, n: a.n })))}
+                        onClick={() => audio.togglePage(data.ayahs.map((a) => ({ key: a.key, s: a.s, n: a.n })), page)}
                       >
                         {audio.seqPlaying ? <Square className="h-3.5 w-3.5 fill-current" /> : <Headphones className="h-3.5 w-3.5" />}
                         {audio.seqPlaying ? "إيقاف" : "استمع للصفحة"}
@@ -1128,7 +1197,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                   size="sm"
                   variant={audio.seqPlaying ? "default" : "outline"}
                   className={cn("h-8 gap-1.5", audio.seqPlaying && "bg-emerald-600 hover:bg-emerald-700")}
-                  onClick={() => audio.togglePage(data.ayahs.map((a) => ({ key: a.key, s: a.s, n: a.n })))}
+                  onClick={() => audio.togglePage(data.ayahs.map((a) => ({ key: a.key, s: a.s, n: a.n })), page)}
                 >
                   {audio.seqPlaying ? <Square className="h-3.5 w-3.5 fill-current" /> : <Headphones className="h-3.5 w-3.5" />}
                   {audio.seqPlaying ? "إيقاف" : "استمع للصفحة"}
@@ -1179,6 +1248,74 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* التجويد الملوّن + دليل الألوان */}
+            <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+              <button
+                type="button"
+                onClick={() => applyTajweed(!tajweed)}
+                aria-pressed={tajweed}
+                title="تلوين أحكام التجويد: المدود والغنن حمراء، القلقلة خضراء"
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-extrabold transition-all sm:text-xs",
+                  tajweed
+                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                    : "border-border/70 text-muted-foreground hover:border-primary/50 hover:text-primary",
+                )}
+              >
+                <Palette className="h-4 w-4" />
+                تجويد ملوّن
+              </button>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 rounded-lg border border-border/70 px-3 py-1.5 text-[11px] font-extrabold text-muted-foreground transition-all hover:border-primary/50 hover:text-primary sm:text-xs"
+                    title="دليل ألوان التجويد"
+                  >
+                    دليل الألوان
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-72" dir="rtl" align="start">
+                  <p className="mb-2.5 flex items-center gap-1.5 text-xs font-extrabold text-foreground">
+                    <Palette className="h-4 w-4 text-primary" />
+                    ألوان أحكام التجويد
+                  </p>
+                  <div className="space-y-2.5">
+                    {TAJWEED_LEGEND.map((grp) => (
+                      <div key={grp.title}>
+                        <p className={cn("mb-1 text-xs font-extrabold", grp.colorCls)}>
+                          <span className="font-quran text-base">ـــ </span>
+                          {grp.title}
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {grp.rules.map((r) => (
+                            <span
+                              key={r}
+                              className="rounded-md border border-border/60 bg-muted/50 px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground"
+                              title={TAJWEED_RULES[r].desc}
+                            >
+                              {TAJWEED_RULES[r].label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-3 border-t border-border/60 pt-2 text-[10px] leading-5 text-muted-foreground">
+                    مرّر المؤشر فوق أي مقطع ملوّن في المصحف لتري اسم الحكم — الألوان تعينك على التلاوة
+                    الصحيحة كما في مصاحف التجويد.
+                  </p>
+                </PopoverContent>
+              </Popover>
+
+              {tajweed && (
+                <p className="text-[10px] leading-4 text-muted-foreground">
+                  أحمر: مدود وغنن • أخضر: قلقلة • رمادي: لا يُنطق
+                </p>
+              )}
             </div>
             <p className="text-[10px] leading-4 text-muted-foreground">
               التلاوة تحتاج اتصالاً أول مرة، ثم تُحفظ تلقائياً وتعمل دون إنترنت.
@@ -1387,7 +1524,11 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                             )}
                             title="بطاقة الآية: التفسير وأسباب النزول والكلمات الصعبة"
                           >
-                            {a.text}
+                            {tajweed && tajweedAyahs[a.key] ? (
+                              <TajweedWords words={tajweedAyahs[a.key]} />
+                            ) : (
+                              a.text
+                            )}
                           </button>{" "}
                           <span
                             className={cn(
@@ -1732,6 +1873,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
             const ayah = data.ayahs.find((a) => a.key === cardKey)
             if (!ayah) return null
             const words = ayah.text.split(/\s+/).filter(Boolean)
+            const tajweedWords = tajweed && tajweedAyahs[ayah.key] ? tajweedAyahs[ayah.key] : null
             const gCount = ayah.groups.length
             return (
               <>
@@ -1751,7 +1893,9 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                 <div className="scroll-thin space-y-4 overflow-y-auto pl-1" dir="rtl">
                   {/* نص الآية */}
                   <blockquote className="rounded-xl border border-gold/40 bg-primary/5 p-3">
-                    <p className="font-quran text-right text-xl leading-[2.2] text-foreground">{ayah.text}</p>
+                    <p className="font-quran text-right text-xl leading-[2.2] text-foreground">
+                      {tajweedWords ? <TajweedWords words={tajweedWords} /> : ayah.text}
+                    </p>
                   </blockquote>
 
                   {/* التفسير الميسّر */}
@@ -1797,6 +1941,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                     <div className="flex flex-wrap gap-1.5">
                       {words.map((w, wi) => {
                         const hard = addedHard.has(`${ayah.key}:${w}`)
+                        const segs = tajweedWords?.[wi]
                         return (
                           <button
                             key={wi}
@@ -1811,7 +1956,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                             )}
                             title={hard ? "معلّمة كصعبة" : "علّمها كصعبة"}
                           >
-                            {w}
+                            {segs ? <TajweedWord segs={segs} /> : w}
                           </button>
                         )
                       })}
@@ -1922,6 +2067,23 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* المشغل الصوتي العائم — يظهر عند أي تلاوة نشطة */}
+      <AudioPlayerBar
+        audio={audio}
+        label={
+          audio.playingKey
+            ? (() => {
+                const a = data.ayahs.find((x) => x.key === audio.playingKey)
+                return a ? `${surahName(a.s)} ${arNum(a.n)}` : "تلاوة جارية"
+              })()
+            : ""
+        }
+        sublabel={`الجزء ${arNum(data.juz)} • صفحة ${arNum(page)}`}
+      />
+
+      {/* مساحة أسفل المحتوى حتى لا يغطي الشريطُ العائمُ آخر الأسطر */}
+      {audio.playingKey && <div className="h-28" aria-hidden />}
     </div>
   )
 }

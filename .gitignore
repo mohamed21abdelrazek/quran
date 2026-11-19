@@ -60,3 +60,9 @@ android-shell/www/
 android-shell/android/
 android-shell/dist/
 android-shell/node_modules/
+
+# بيئة التطوير — ليست جزءاً من التطبيق
+/skills/
+/screenshots/
+.zscripts/
+db/custom.db-journal
