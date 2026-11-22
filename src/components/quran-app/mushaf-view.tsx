@@ -164,7 +164,7 @@ const LASTREAD_LS_KEY = "wardi:lastRead"
 
 // ==================== نسخة المصحف ====================
 
-type MushafMode = "text" | "madani"
+type MushafMode = "text" | "madani" | "tajweed"
 const MUSHAF_LS_KEY = "wardi:mushafMode"
 
 /** التجويد الملوّن — تشغيل/إيقاف تلوين أحكام التجويد في النص التفاعلي */
@@ -173,6 +173,80 @@ const TAJWEED_LS_KEY = "wardi:tajweed"
 /** مسار صورة صفحة من مصحف المدينة المنورة (طبعة مجمع الملك فهد) */
 function madaniPageUrl(n: number): string {
   return `/mushaf/madani/page${String(n).padStart(3, "0")}.png`
+}
+
+/** مسار صورة صفحة من مصحف التجويد الملوّن (طبعة دار المعرفة — ألوان الأحكام) */
+function tajweedPageUrl(n: number): string {
+  return `/mushaf/tajweed/page${String(n).padStart(3, "0")}.png`
+}
+
+/** النسخ المصوّرة — مصحف المدينة ومصحف التجويد */
+const IMAGE_VARIANTS: Record<
+  "madani" | "tajweed",
+  { url: (n: number) => string; aspect: string; label: string; zoomHint: string }
+> = {
+  madani: {
+    url: madaniPageUrl,
+    aspect: "1260 / 2038",
+    label: "مصحف المدينة",
+    zoomHint: "صفحة مكبّرة من مصحف المدينة المنورة",
+  },
+  tajweed: {
+    url: tajweedPageUrl,
+    aspect: "456 / 707",
+    label: "مصحف التجويد",
+    zoomHint: "صفحة مكبّرة من مصحف التجويد الملوّن",
+  },
+}
+
+/** مبدّل نسخة المصحف — ثلاث نسخ: المدينة بالصور، التجويد الملوّن، والنص التفاعلي */
+function MushafModeSwitcher({ mode, onChange }: { mode: MushafMode; onChange: (m: MushafMode) => void }) {
+  const options = [
+    {
+      m: "madani" as const,
+      Icon: Book,
+      label: "مصحف المدينة",
+      title: "مصحف المدينة المنورة — طبعة مجمع الملك فهد بالصور",
+    },
+    {
+      m: "tajweed" as const,
+      Icon: Palette,
+      label: "مصحف التجويد",
+      title: "مصحف التجويد الملوّن — ألوان أحكام التجويد على صفحات المصحف",
+    },
+    {
+      m: "text" as const,
+      Icon: BookOpenText,
+      label: "نص عثماني",
+      title: "نص عثماني تفاعلي — التفسير والمتشابهات مباشرة على الكلمات",
+    },
+  ]
+  return (
+    <div
+      className="grid grid-cols-3 gap-1 rounded-xl border border-border/70 bg-muted/40 p-1"
+      role="group"
+      aria-label="اختيار نسخة المصحف"
+    >
+      {options.map(({ m, Icon, label, title }) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          aria-pressed={mode === m}
+          title={title}
+          className={cn(
+            "flex min-w-0 items-center justify-center gap-1 rounded-lg px-1 py-2 text-[10px] font-extrabold transition-all sm:gap-1.5 sm:px-1.5 sm:text-xs",
+            mode === m
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          <span className="truncate">{label}</span>
+        </button>
+      ))}
+    </div>
+  )
 }
 
 const MODES: Record<
@@ -259,10 +333,12 @@ const MODES: Record<
 let lastPageVisited = 1
 let lastFontScale = 1
 
-// ==================== صفحة مصحف المدينة (صورة) ====================
+// ==================== صفحة مصحف مصوّرة (المدينة / التجويد) ====================
 
 interface MadaniPageProps {
   n: number
+  /** نسخة المصحف المصوّرة */
+  variant: "madani" | "tajweed"
   /** نمط القراءة الحالي — يحدد فلتر الصورة */
   mode: ReadingMode
   /** اتجاه التقليب الأخير — لحركة الانزلاق */
@@ -282,13 +358,14 @@ const MADANI_FILTER: Record<ReadingMode, string> = {
   night: "brightness(0.82) contrast(0.96)",
 }
 
-/** صورة صفحة حقيقية من مصحف المدينة — عرض غامر فاخر:
+/** صفحة مصحف مصوّرة — عرض غامر فاخر:
  *  الصفحة هي البطل: إطار ذهبي مزدوج، ظل عميق، أزرار تقليب عائمة،
- *  وحركة انزلاقية باتجاه التقليب. يُعاد تركيبها مع كل صفحة (key). */
-function MadaniPage({ n, mode, dir, onOpen, onSwipe, onFallback }: MadaniPageProps) {
+ *  وحركة انزلاقية باتجاه التقليب العربي. يُعاد تركيبها مع كل صفحة (key). */
+function MushafImagePage({ n, variant, mode, dir, onOpen, onSwipe, onFallback }: MadaniPageProps) {
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const meta = IMAGE_VARIANTS[variant]
 
   return (
     <div
@@ -304,7 +381,8 @@ function MadaniPage({ n, mode, dir, onOpen, onSwipe, onFallback }: MadaniPagePro
         const t = e.changedTouches[0]
         const dx = t.clientX - s.x
         const dy = t.clientY - s.y
-        if (Math.abs(dx) >= 60 && Math.abs(dy) <= 50) onSwipe(dx < 0 ? 1 : -1)
+        // تقليب عربي: السحب يميناً (باتجاه اليد اليمنى) يكشف الصفحة التالية
+        if (Math.abs(dx) >= 60 && Math.abs(dy) <= 50) onSwipe(dx > 0 ? 1 : -1)
       }}
     >
       {/* هالة ذهبية خلف الصفحة */}
@@ -339,7 +417,7 @@ function MadaniPage({ n, mode, dir, onOpen, onSwipe, onFallback }: MadaniPagePro
       >
         <div
           className="relative overflow-hidden rounded-[5px] border border-gold/40 bg-white dark:border-gold/30 dark:bg-[#101210]"
-          style={{ aspectRatio: "1260 / 2038" }}
+          style={{ aspectRatio: meta.aspect }}
         >
           {!loaded && !failed && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-muted/60 backdrop-blur-sm">
@@ -359,8 +437,8 @@ function MadaniPage({ n, mode, dir, onOpen, onSwipe, onFallback }: MadaniPagePro
           ) : (
             <img
               key={n}
-              src={madaniPageUrl(n)}
-              alt={`صفحة ${arNum(n)} من مصحف المدينة المنورة — الجزء ${arNum(pageToJuz(n))}`}
+              src={meta.url(n)}
+              alt={`صفحة ${arNum(n)} من ${meta.label} ${variant === "madani" ? "— الجزء " + arNum(pageToJuz(n)) : "الملوّن"}`}
               onLoad={() => setLoaded(true)}
               onError={() => setFailed(true)}
               onClick={onOpen}
@@ -368,7 +446,8 @@ function MadaniPage({ n, mode, dir, onOpen, onSwipe, onFallback }: MadaniPagePro
               style={{ filter: MADANI_FILTER[mode] }}
               className={cn(
                 "h-full w-full animate-in fade-in duration-300 cursor-zoom-in bg-white object-contain transition-opacity",
-                dir === 1 ? "slide-in-from-right-12" : "slide-in-from-left-12",
+                // انزلاق باتجاه التقليب العربي: التالية تدخل من اليسار
+                dir === 1 ? "slide-in-from-left-12" : "slide-in-from-right-12",
                 loaded ? "opacity-100" : "opacity-0",
               )}
             />
@@ -471,7 +550,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
         const m = localStorage.getItem(MODE_LS_KEY)
         if (m === "light" || m === "sepia" || m === "night") setMode(m)
         const mm = localStorage.getItem(MUSHAF_LS_KEY)
-        if (mm === "text" || mm === "madani") setMushafMode(mm)
+        if (mm === "text" || mm === "madani" || mm === "tajweed") setMushafMode(mm)
         const tj = localStorage.getItem(TAJWEED_LS_KEY)
         if (tj === "0") setTajweed(false)
         if (!wird) {
@@ -519,13 +598,14 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
     return () => window.removeEventListener("keydown", onKey)
   }, [page, focusKey])
 
-  // تحميل مسبق لصفحتي الجوار — تقليب فوري في وضع الصور
+  // تحميل مسبق لصفحتي الجوار — تقليب فوري في الوضعين المصوّرين
   useEffect(() => {
-    if (mushafMode !== "madani") return
+    if (mushafMode === "text") return
+    const url = IMAGE_VARIANTS[mushafMode].url
     for (const p of [page - 1, page + 1]) {
       if (p >= 1 && p <= TOTAL_PAGES) {
         const img = new window.Image()
-        img.src = madaniPageUrl(p)
+        img.src = url(p)
       }
     }
   }, [page, mushafMode])
@@ -657,6 +737,8 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
   /** حفظ صور المصحف الـ٦٠٤ في ذاكرة الجهاز — لتصفح كامل بلا إنترنت (نسخة الويب) */
   const downloadAllPages = async () => {
     if (dlProgress !== null) return
+    if (mushafMode === "text") return
+    const url = IMAGE_VARIANTS[mushafMode].url
     setDlProgress(0)
     let done = 0
     for (let i = 1; i <= TOTAL_PAGES; i += 8) {
@@ -664,7 +746,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
       await Promise.all(
         batch.map(async (p) => {
           try {
-            await fetch(madaniPageUrl(p))
+            await fetch(url(p))
           } catch {
             /* تجاهل — ما حُفظ سابقاً يبقى */
           }
@@ -794,8 +876,8 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
         )
       })()}
 
-      {/* شريط مصغّر — وضع مصحف المدينة: الصفحة أولاً والأدوات تنحسر */}
-      {mushafMode === "madani" && (
+      {/* شريط مصغّر — الوضعان المصوّران: الصفحة أولاً والأدوات تنحسر */}
+      {mushafMode !== "text" && (
         <div ref={topRef} className="scroll-mt-36">
           <Card className="border-border/60 shadow-sm">
             <CardContent className="p-2.5 sm:p-3">
@@ -856,48 +938,14 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
                 </div>
               </div>
 
-              {/* لوحة الأدوات الكاملة — قابلة للطي في وضع الصور */}
+              {/* مبدّل نسخة المصحف — ظاهر دائماً: المدينة / التجويد / النص */}
+              <div className="mt-2.5">
+                <MushafModeSwitcher mode={mushafMode} onChange={applyMushafMode} />
+              </div>
+
+              {/* لوحة الأدوات الكاملة — قابلة للطي في الوضع المصوّر */}
               {mushafToolsOpen && (
                 <div className="mt-3 space-y-3.5 border-t border-border/60 pt-3">
-                  {/* مبدّل نسخة المصحف */}
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <span className="shrink-0 text-[11px] font-extrabold text-muted-foreground">نسخة المصحف:</span>
-                    <div
-                      className="grid min-w-0 flex-1 grid-cols-2 gap-1 rounded-xl border border-border/70 bg-muted/40 p-1 sm:max-w-md"
-                      role="group"
-                      aria-label="اختيار نسخة المصحف"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => applyMushafMode("text")}
-                        aria-pressed={mushafMode === "text"}
-                        className={cn(
-                          "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-extrabold transition-all sm:text-xs",
-                          mushafMode === "text"
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        <BookOpenText className="h-4 w-4 shrink-0" />
-                        نص عثماني تفاعلي
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => applyMushafMode("madani")}
-                        aria-pressed={mushafMode === "madani"}
-                        className={cn(
-                          "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-extrabold transition-all sm:text-xs",
-                          mushafMode === "madani"
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        <Book className="h-4 w-4 shrink-0" />
-                        مصحف المدينة
-                      </button>
-                    </div>
-                  </div>
-
                   {/* شريط التنقل السريع */}
                   <div className="flex items-center gap-3">
                     <Slider
@@ -1123,43 +1171,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
 
             {/* اختيار نسخة المصحف */}
             <div className="flex flex-wrap items-center gap-2.5 border-t border-border/60 pt-3">
-              <span className="shrink-0 text-[11px] font-extrabold text-muted-foreground">نسخة المصحف:</span>
-              <div
-                className="grid min-w-0 flex-1 grid-cols-2 gap-1 rounded-xl border border-border/70 bg-muted/40 p-1 sm:max-w-md"
-                role="group"
-                aria-label="اختيار نسخة المصحف"
-              >
-                <button
-                  type="button"
-                  onClick={() => applyMushafMode("text")}
-                  aria-pressed={mushafMode === "text"}
-                  title="نص عثماني تفاعلي — التفسير والمتشابهات مباشرة على الكلمات"
-                  className={cn(
-                    "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-extrabold transition-all sm:text-xs",
-                    mushafMode === "text"
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <BookOpenText className="h-4 w-4 shrink-0" />
-                  نص عثماني تفاعلي
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyMushafMode("madani")}
-                  aria-pressed={mushafMode === "madani"}
-                  title="مصحف المدينة المنورة — طبعة مجمع الملك فهد بالصور"
-                  className={cn(
-                    "flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-extrabold transition-all sm:text-xs",
-                    mushafMode === "madani"
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Book className="h-4 w-4 shrink-0" />
-                  مصحف المدينة
-                </button>
-              </div>
+              <MushafModeSwitcher mode={mushafMode} onChange={applyMushafMode} />
             </div>
 
             {/* علاماتي المرجعية */}
@@ -1326,12 +1338,13 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
       )}
 
       {/* ==================== عرض الصفحة ==================== */}
-      {mushafMode === "madani" ? (
+      {mushafMode !== "text" ? (
         /* الصفحة المصوّرة غامرة بلا كارد — هي البطل */
         <div className="animate-in fade-in-50 px-1 py-2">
-          <MadaniPage
-                  key={page}
+          <MushafImagePage
+                  key={`${mushafMode}-${page}`}
                   n={page}
+                  variant={mushafMode}
                   mode={mode}
                   dir={flipDir}
                   onOpen={() => {
@@ -1642,7 +1655,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
       {!wird && (
         <p className="flex items-center justify-center gap-1.5 text-center text-[11px] leading-5 text-muted-foreground">
           <MousePointerClick className="h-3.5 w-3.5 shrink-0" />
-          {mushafMode === "madani"
+          {mushafMode !== "text"
             ? "اضغط الصورة للتكبير — واضغط أي آية في لوحة «آيات الصفحة» لتفسيرها ومتشابهاتها والاستماع إليها"
             : "استخدم الأسهم للتنقل — اضغط على آية لتفسيرها وأسباب نزولها، وزر «متشابهات» يعرض نظائرها مع إبراز الفرق"}
         </p>
@@ -2010,7 +2023,7 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary">
                 <Book className="h-4 w-4" />
               </span>
-              مصحف المدينة — صفحة {arNum(page)}
+              {mushafMode !== "text" ? IMAGE_VARIANTS[mushafMode].label : "المصحف"} — صفحة {arNum(page)}
               <span className="text-xs font-medium text-muted-foreground">
                 الجزء {arNum(data.juz)} • {data.surahLabel}
               </span>
@@ -2057,8 +2070,8 @@ export function MushafView({ state, wird, onCloseWird, action }: ViewProps) {
             dir="rtl"
           >
             <img
-              src={madaniPageUrl(page)}
-              alt={`صفحة ${arNum(page)} مكبّرة من مصحف المدينة المنورة`}
+              src={mushafMode !== "text" ? IMAGE_VARIANTS[mushafMode].url(page) : madaniPageUrl(page)}
+              alt={`صفحة ${arNum(page)} مكبّرة ${mushafMode !== "text" ? IMAGE_VARIANTS[mushafMode].zoomHint : "من المصحف"}`}
               onDoubleClick={() => setZoom((z) => (z === 1 ? 2 : 1))}
               draggable={false}
               className="block min-w-full select-none"

@@ -5,6 +5,7 @@
 import { buildAppState, cannotToday, updateRanges, applyOnboarding, resetAll, completeTask, snoozeTask, getProfile } from "@/lib/engine"
 import { addDifficultWord, removeDifficultWord, toggleBookmark, logQuiz } from "@/lib/tools"
 import { db } from "@/lib/db"
+import { prepareOfflineDb } from "@/lib/db-offline"
 import { MAX_CAPACITY, MAX_UNIT_SIZE, type Intensity, type Quality } from "@/lib/content"
 import type { AppState } from "@/lib/types"
 
@@ -14,6 +15,9 @@ export const backendMode: BackendMode = "offline"
 
 /** تحميل حالة التطبيق — مباشرة من المحرك */
 export async function backendLoad(): Promise<AppState> {
+  // استعادة تلقائية من النسخة الاحتياطية الأصلية إن فُقد تخزين الويب
+  // (تُكتب في localStorage قبل أول قراءة من المحرك)
+  await prepareOfflineDb()
   return buildAppState()
 }
 

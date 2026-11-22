@@ -8,6 +8,99 @@
 
 const LS_KEY = "wardi:db:v1"
 
+// ==================== نسخة احتياطية أصلية (تطبيق الجوال) ====================
+
+// تُكتب البيانات أيضاً في تخزين أندرويد الأصلي (إضافة Capacitor Preferences)،
+// فإن فُقد تخزين الويب لأي سبب (إخلاء مساحة/تلف) تُستعاد الخطة كاملة
+// تلقائياً عند فتح التطبيق — حماية إضافية لخطة الحفظ على الجهاز.
+
+interface NativePreferencesPlugin {
+  get(o: { key: string }): Promise<{ value: string | null }>
+  set(o: { key: string; value: string }): Promise<void>
+}
+
+function nativePrefs(): NativePreferencesPlugin | null {
+  try {
+    const cap = (
+      window as {
+        Capacitor?: {
+          isNativePlatform?: () => boolean
+          Plugins?: { Preferences?: NativePreferencesPlugin }
+        }
+      }
+    ).Capacitor
+    if (cap?.isNativePlatform?.() && cap.Plugins?.Preferences) return cap.Plugins.Preferences
+  } catch {
+    /* تجاهل */
+  }
+  return null
+}
+
+let backupTimer: ReturnType<typeof setTimeout> | null = null
+
+/** هل في القطة بيانات حقيقية؟ (لن نعتبر الإفراغ استعادة) */
+function dbHasData(d: DbData): boolean {
+  return (
+    d.profile.length > 0 ||
+    d.pageState.length > 0 ||
+    d.dailyPlan.length > 0 ||
+    d.task.length > 0 ||
+    d.activity.length > 0 ||
+    d.difficultWord.length > 0 ||
+    d.bookmark.length > 0 ||
+    d.quizLog.length > 0
+  )
+}
+
+/** كتابة القطة في التخزين الأصلي — مؤجلة قليلاً لتجميع التعديلات المتلاحقة */
+function scheduleNativeBackup(json: string, isEmpty: boolean): void {
+  const prefs = nativePrefs()
+  if (!prefs) return
+  if (backupTimer) clearTimeout(backupTimer)
+  const write = () => {
+    backupTimer = null
+    void prefs.set({ key: LS_KEY, value: json }).catch(() => undefined)
+  }
+  // الإفراغ يُكتب فوراً (حتى لا تُستعاد بيانات قديمة بعد تصفير التطبيق)
+  if (isEmpty) write()
+  else backupTimer = setTimeout(write, 1200)
+}
+
+/** تجهيز قاعدة البيانات قبل أول استخدام — استعادة من النسخة الأصلية إن فُقد تخزين الويب */
+export async function prepareOfflineDb(): Promise<void> {
+  load()
+  if (cache && dbHasData(cache)) return
+  const prefs = nativePrefs()
+  if (!prefs) return
+  try {
+    const { value } = await prefs.get({ key: LS_KEY })
+    if (value) {
+      const parsed = parseDb(value)
+      if (parsed && dbHasData(parsed)) {
+        cache = parsed
+        persist() // أعد كتابتها في تخزين الويب فوراً
+      }
+    }
+  } catch {
+    /* تجاهل */
+  }
+}
+
+/** تصدير كل البيانات كسلسلة JSON — للنسخ الاحتياطي اليدوي */
+export function exportOfflineDb(): string {
+  load()
+  return JSON.stringify(cache ?? emptyDb())
+}
+
+/** استيراد نسخة احتياطية — يعيد ترتيب التواريخ ويكتب في التخزينين */
+export function importOfflineDb(json: string): boolean {
+  const parsed = parseDb(json)
+  if (!parsed) return false
+  cache = parsed
+  persist()
+  return true
+}
+
 // ==================== الأنواع ====================
 
 interface ProfileRow {
@@ -137,23 +230,41 @@ function emptyDb(): DbData {
   }
 }
 
+/** إحياء حقول التواريخ (ISO ← Date) داخل لقطة محلّلة */
+function reviveDates(d: DbData): void {
+  for (const [model, fields] of Object.entries(DATE_FIELDS)) {
+    for (const row of (d as unknown as Record<string, unknown[]>[])[model] ?? []) {
+      for (const f of fields) {
+        const v = (row as Record<string, unknown>)[f]
+        if (typeof v === "string") (row as Record<string, unknown>)[f] = new Date(v)
+      }
+    }
+  }
+}
+
+/** تحليل لقطة مخزنة — null إن كانت تالفة */
+function parseDb(raw: string): DbData | null {
+  try {
+    const parsed = JSON.parse(raw) as DbData
+    if (!parsed || typeof parsed !== "object") return null
+    const d = { ...emptyDb(), ...parsed }
+    reviveDates(d)
+    return d
+  } catch {
+    return null
+  }
+}
+
 function load(): DbData {
   if (cache) return cache
   try {
     const raw = typeof localStorage !== "undefined" ? localStorage.getItem(LS_KEY) : null
     if (raw) {
-      const parsed = JSON.parse(raw) as DbData
-      cache = { ...emptyDb(), ...parsed }
-      // إحياء حقول التواريخ
-      for (const [model, fields] of Object.entries(DATE_FIELDS)) {
-        for (const row of (cache as unknown as Record<string, unknown[]>[])[model] ?? []) {
-          for (const f of fields) {
-            const v = (row as Record<string, unknown>)[f]
-            if (typeof v === "string") (row as Record<string, unknown>)[f] = new Date(v)
-          }
-        }
+      const parsed = parseDb(raw)
+      if (parsed) {
+        cache = parsed
+        return cache
       }
-      return cache
     }
   } catch {
     /* لقطة تالفة — نبدأ من جديد */
@@ -166,7 +277,9 @@ function persist(): void {
   if (!cache) return
   try {
     if (typeof localStorage === "undefined") return
-    localStorage.setItem(LS_KEY, JSON.stringify(cache))
+    const json = JSON.stringify(cache)
+    localStorage.setItem(LS_KEY, json)
+    scheduleNativeBackup(json, !dbHasData(cache))
   } catch {
     /* التخزين ممتلئ — نتجاهل بهدوء */
   }

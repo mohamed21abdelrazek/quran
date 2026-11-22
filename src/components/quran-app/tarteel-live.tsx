@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { LiveMatcher, type LiveSummary, type LiveWordState } from "@/lib/live-match"
 import { startLiveCapture, type LiveCaptureHandle } from "@/lib/live-capture"
+import { detectSpeechEngine, startSpeech, type SpeechHandle } from "@/lib/speech"
 import { formatSeconds } from "@/lib/voice"
 import type { PagePayload } from "@/lib/mushaf-data"
 import { SURAHS } from "@/lib/quran"
@@ -81,6 +82,9 @@ export function TarteelLive({ page, payload, onLog, onAddHardWords, openMushaf, 
 
   const matcherRef = useRef<LiveMatcher | null>(null)
   const captureRef = useRef<LiveCaptureHandle | null>(null)
+  // محرك التعرّف داخل الجهاز (تطبيق الجوال / المتصفحات الداعمة) — بلا خادم
+  const speechRef = useRef<SpeechHandle | null>(null)
+  const engineRef = useRef<"device" | "server">("server")
   const chainRef = useRef<Promise<void>>(Promise.resolve())
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const peekTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
@@ -103,6 +107,8 @@ export function TarteelLive({ page, payload, onLog, onAddHardWords, openMushaf, 
   // تنظيف شامل عند الإلغاء
   useEffect(() => {
     return () => {
+      speechRef.current?.abort()
+      speechRef.current = null
       captureRef.current?.stop()
       captureRef.current = null
       if (timerRef.current) clearInterval(timerRef.current)
@@ -193,12 +199,32 @@ export function TarteelLive({ page, payload, onLog, onAddHardWords, openMushaf, 
     setSeconds(0)
     setLevel(0)
     try {
-      const handle = await startLiveCapture({
-        onSegment: enqueueSegment,
-        onLevel: setLevel,
-        onSpeechChange: setSpeaking,
-      })
-      captureRef.current = handle
+      if (detectSpeechEngine() === "server") {
+        // مسار الخادم (نسخة الموقع على متصفحات بلا دعم محلي)
+        engineRef.current = "server"
+        const handle = await startLiveCapture({
+          onSegment: enqueueSegment,
+          onLevel: setLevel,
+          onSpeechChange: setSpeaking,
+        })
+        captureRef.current = handle
+      } else {
+        // مسار الجهاز: تفريغ داخل الجهاز — بلا خادم إطلاقاً
+        engineRef.current = "device"
+        const handle = await startSpeech({
+          onPartial: (text) => setTail(text),
+          onFinal: (text) => applyFeed(text),
+          onSpeakingChange: setSpeaking,
+          onError: (msg) => {
+            if (!errorShownRef.current) {
+              errorShownRef.current = true
+              toast({ title: "انقطع الاستماع", description: msg, variant: "destructive" })
+              window.setTimeout(() => (errorShownRef.current = false), 8000)
+            }
+          },
+        })
+        speechRef.current = handle
+      }
       setPhase("listening")
       timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000)
     } catch (e) {
@@ -209,28 +235,42 @@ export function TarteelLive({ page, payload, onLog, onAddHardWords, openMushaf, 
 
   const finishListening = () => {
     if (phase !== "listening") return
+    const speech = speechRef.current
+    speechRef.current = null
     captureRef.current?.stop()
     captureRef.current = null
     if (timerRef.current) clearInterval(timerRef.current)
     timerRef.current = null
-    // انتظر سلسلة التفريغ الجارية ثم لخّص
-    chainRef.current = chainRef.current.then(() => {
-      const m = matcherRef.current
-      const s = m ? m.summary() : null
-      setSummary(s)
-      setPhase("done")
-      setLevel(0)
-      if (s) {
-        vibrate([100, 60, 100])
-        void onLog(s.score, `ترتيل لحظي صفحة ${page}`)
-        if (s.score === 100) {
-          toast({ title: "ما شاء الله! صفحة كاملة بلا خطأ", description: "تقبل الله — واصل" })
+    // انتظر آخر ما سُمع (الجهاز يسلّم الجلسة الأخيرة عبر onFinal) ثم لخّص
+    chainRef.current = chainRef.current
+      .then(async () => {
+        if (speech) {
+          try {
+            await speech.stop()
+          } catch {
+            /* تجاهل */
+          }
         }
-      }
-    })
+      })
+      .then(() => {
+        const m = matcherRef.current
+        const s = m ? m.summary() : null
+        setSummary(s)
+        setPhase("done")
+        setLevel(0)
+        if (s) {
+          vibrate([100, 60, 100])
+          void onLog(s.score, `ترتيل لحظي صفحة ${page}`)
+          if (s.score === 100) {
+            toast({ title: "ما شاء الله! صفحة كاملة بلا خطأ", description: "تقبل الله — واصل" })
+          }
+        }
+      })
   }
 
   const resetSession = () => {
+    speechRef.current?.abort()
+    speechRef.current = null
     captureRef.current?.stop()
     captureRef.current = null
     if (timerRef.current) clearInterval(timerRef.current)
@@ -307,15 +347,24 @@ export function TarteelLive({ page, payload, onLog, onAddHardWords, openMushaf, 
                 <Radio className="h-4 w-4 animate-pulse" />
                 يستمع… {formatSeconds(seconds)}
               </p>
-              {/* مؤشر الصوت الحي — من ميكروفونك مباشرة */}
+              {/* مؤشر الصوت الحي — من ميكروفونك مباشرة (أو نبض حي في مسار الجهاز) */}
               <div className="flex h-10 items-end gap-1" aria-hidden>
-                {LEVEL_BARS.map((f, i) => (
-                  <span
-                    key={i}
-                    className="w-1.5 rounded-full bg-emerald-500 transition-[height] duration-100"
-                    style={{ height: `${Math.max(4, Math.min(40, 6 + level * f * 44))}px` }}
-                  />
-                ))}
+                {engineRef.current === "server"
+                  ? LEVEL_BARS.map((f, i) => (
+                      <span
+                        key={i}
+                        className="w-1.5 rounded-full bg-emerald-500 transition-[height] duration-100"
+                        style={{ height: `${Math.max(4, Math.min(40, 6 + level * f * 44))}px` }}
+                      />
+                    ))
+                  : LEVEL_BARS.map((_, i) => (
+                      <span key={i} className="h-10">
+                        <span
+                          className={cn("eq-bar block w-1.5 rounded-full bg-emerald-500", speaking && "eq-on")}
+                          style={{ animationDelay: `${i * 120}ms` }}
+                        />
+                      </span>
+                    ))}
               </div>
               <p className="text-[11px] leading-5 text-muted-foreground">
                 {busy > 0 ? (

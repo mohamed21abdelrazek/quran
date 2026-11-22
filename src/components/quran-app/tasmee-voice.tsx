@@ -1,14 +1,19 @@
 "use client"
 
-// التسميع الصوتي: سجّل تلاوتك من الحفظ — نخفي الصفحة عنك ونستمع ثم نصحّح كلمة كلمة
-// (الإخفاء التدريجي متاح هنا أيضاً: كلمة/آية/نسبة — والإخفاء الكامل تلقائي عند التسجيل)
+// التسميع الصوتي: سمّع من حفظك والتصحيح يحدث داخل جهازك —
+// ١) في تطبيق الجوال: خدمة التعرف على الكلام في أندرويد (إضافة Capacitor)
+// ٢) في المتصفح: Web Speech API — وبديل أخير: تسجيل + الخادم (نسخة الموقع)
+// النص المسموع يُصحَّح محلياً كلمة كلمة بمحاذاة Needleman–Wunsch،
+// مع عرض حيّ لما نسمعه أثناء التلاوة.
+// (الإخفاء التدريجي متاح أيضاً: كلمة/آية/نسبة — والإخفاء الكامل تلقائي عند البدء)
 
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { TasmeeResultView } from "./tasmee-result-view"
 import { HideablePage } from "./hideable-page"
 import { createVoiceRecorder, formatSeconds, MicDeniedError } from "@/lib/voice"
-import type { TasmeeResult } from "@/lib/tasmee"
+import { detectSpeechEngine, startSpeech, type SpeechHandle } from "@/lib/speech"
+import { gradeTasmee, type TasmeeResult } from "@/lib/tasmee"
 import type { PagePayload } from "@/lib/mushaf-data"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
@@ -40,6 +45,7 @@ interface Props {
 export function TasmeeVoice({ page, payload, onAddMistakes, onLog, savingHard }: Props) {
   const { toast } = useToast()
   const recorderRef = useRef<ReturnType<typeof createVoiceRecorder> | null>(null)
+  const speechRef = useRef<SpeechHandle | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const hideApiRef = useRef<{ hideAll: () => void; showAll: () => void } | null>(null)
   const [recording, setRecording] = useState(false)
@@ -47,10 +53,13 @@ export function TasmeeVoice({ page, payload, onAddMistakes, onLog, savingHard }:
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState<TasmeeResult | null>(null)
   const [transcription, setTranscription] = useState("")
+  const [liveText, setLiveText] = useState("")
+  const [speaking, setSpeaking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     return () => {
+      speechRef.current?.abort()
       recorderRef.current?.dispose()
       if (timerRef.current) clearInterval(timerRef.current)
     }
@@ -62,6 +71,8 @@ export function TasmeeVoice({ page, payload, onAddMistakes, onLog, savingHard }:
   }, [page])
 
   const resetSession = () => {
+    speechRef.current?.abort()
+    speechRef.current = null
     recorderRef.current?.dispose()
     recorderRef.current = null
     if (timerRef.current) clearInterval(timerRef.current)
@@ -71,32 +82,87 @@ export function TasmeeVoice({ page, payload, onAddMistakes, onLog, savingHard }:
     setSending(false)
     setResult(null)
     setTranscription("")
+    setLiveText("")
+    setSpeaking(false)
     setError(null)
+  }
+
+  const expectedText = payload ? payload.ayahs.map((a) => a.text).join(" ") : ""
+
+  const startTimer = () => {
+    setSeconds(0)
+    timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000)
+  }
+
+  /** مسار الجهاز: تفريغ محلي حي + تصحيح محلي فوري */
+  const startOnDevice = async () => {
+    const engine = detectSpeechEngine()
+    const handle = await startSpeech({
+      onPartial: (text) => setLiveText(text),
+      onSpeakingChange: setSpeaking,
+      onError: (msg) => {
+        setError(msg)
+        toast({ title: "انقطع الاستماع", description: msg, variant: "destructive" })
+      },
+    })
+    speechRef.current = handle
+    hideApiRef.current?.hideAll()
+    setRecording(true)
+    startTimer()
+  }
+
+  /** مسار الخادم (نسخة الموقع على متصفحات بلا دعم): تسجيل ثم إرسال */
+  const startServerRecording = async () => {
+    const rec = createVoiceRecorder()
+    await rec.start()
+    recorderRef.current = rec
+    hideApiRef.current?.hideAll()
+    setRecording(true)
+    startTimer()
   }
 
   const startRecording = async () => {
     setError(null)
     try {
-      const rec = createVoiceRecorder()
-      await rec.start()
-      recorderRef.current = rec
-      // إخفاء الصفحة كاملة — التسميع من الحفظ لا من النظر
-      hideApiRef.current?.hideAll()
-      setSeconds(0)
-      setRecording(true)
-      timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000)
+      if (detectSpeechEngine() === "server") {
+        await startServerRecording()
+      } else {
+        await startOnDevice()
+      }
     } catch (e) {
       const msg = e instanceof MicDeniedError ? e.message : e instanceof Error ? e.message : "تعذّر بدء التسجيل"
       setError(msg)
     }
   }
 
-  const stopAndSend = async () => {
+  /** إنهاء مسار الجهاز: نص نهائي + تصحيح محلي */
+  const finishOnDevice = async () => {
+    const handle = speechRef.current
+    if (!handle) return
+    setSending(true)
+    try {
+      const text = await handle.stop()
+      speechRef.current = null
+      if (text.replace(/\s+/g, "").length < 3) {
+        throw new Error("لم نسمع تلاوة واضحة — تأكد من الميكروفون واقرأ بصوت مسموع ثم أعد المحاولة")
+      }
+      const graded = gradeTasmee(expectedText, text)
+      setTranscription(text)
+      setResult(graded)
+      void onLog(graded, `تسميع صوتي صفحة ${page}`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "تعذّر تصحيح التسميع"
+      setError(msg)
+    } finally {
+      setSending(false)
+      setRecording(false)
+    }
+  }
+
+  /** إنهاء مسار الخادم: إيقاف التسجيل والإرسال للتفريغ */
+  const finishServerRecording = async () => {
     const rec = recorderRef.current
     if (!rec) return
-    if (timerRef.current) clearInterval(timerRef.current)
-    timerRef.current = null
-    setRecording(false)
     setSending(true)
     try {
       const base64 = await rec.stop()
@@ -125,6 +191,17 @@ export function TasmeeVoice({ page, payload, onAddMistakes, onLog, savingHard }:
       setError(msg)
     } finally {
       setSending(false)
+      setRecording(false)
+    }
+  }
+
+  const stopAndSend = async () => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    timerRef.current = null
+    if (speechRef.current) {
+      await finishOnDevice()
+    } else {
+      await finishServerRecording()
     }
   }
 
@@ -135,8 +212,8 @@ export function TasmeeVoice({ page, payload, onAddMistakes, onLog, savingHard }:
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <p className="text-[11px] leading-6 text-muted-foreground">
           اضغط <span className="font-bold text-foreground">«ابدأ التلاوة»</span> — ستُخفى الصفحة كاملة فوراً — ثم سمّعها
-          من حفظك بصوتك المعتاد في التلاوة. عند الإيقاف نستمع إلى تلاوتك ونصحّحها كلمة كلمة: الصحيح بالأخضر، والقريب
-          بالكهرماني، والخطأ بالأحمر مع الصواب. يمكنك أيضاً الإخفاء التدريجي (كلمة/آية) قبل التسجيل إن أردت التدرّب.
+          من حفظك بصوتك المعتاد في التلاوة. أثناء التسميع ترى ما نسمعه حرفياً، وعند الإيقاف نصحّح كلمة كلمة: الصحيح
+          بالأخضر، والقريب بالكهرماني، والخطأ بالأحمر مع الصواب. التصحيح يجري داخل جهازك مباشرة.
         </p>
       </div>
 
@@ -155,16 +232,29 @@ export function TasmeeVoice({ page, payload, onAddMistakes, onLog, savingHard }:
                         className="relative flex h-24 w-24 items-center justify-center rounded-full bg-red-600 text-white shadow-lg transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                         aria-label="إيقاف التسجيل وتصحيح التسميع"
                       >
-                        <span className="absolute inset-0 animate-ping rounded-full bg-red-500/40" />
+                        <span className={cn("absolute inset-0 animate-ping rounded-full bg-red-500/40", !speaking && "animate-none bg-red-500/20")} />
                         <Square className="h-9 w-9 fill-current" />
                       </button>
                       <div className="text-center">
                         <p className="flex items-center justify-center gap-2 text-lg font-extrabold tabular-nums text-red-700 dark:text-red-400">
                           <AudioLines className="h-5 w-5" />
-                          جارٍ التسجيل… {formatSeconds(seconds)}
+                          يستمع إليك… {formatSeconds(seconds)}
                         </p>
-                        <p className="mt-1 text-[11px] text-muted-foreground">سمّع الصفحة كاملة ثم اضغط الإيقاف</p>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {speaking ? "نسمعك — واصل التلاوة" : "سمّع الصفحة كاملة ثم اضغط الإيقاف"}
+                        </p>
                       </div>
+                      {/* ما نسمعه حياً */}
+                      {liveText && (
+                        <div className="w-full max-w-2xl rounded-xl border border-emerald-300/60 bg-emerald-50/70 p-3 text-center dark:border-emerald-600/30 dark:bg-emerald-950/20">
+                          <p className="mb-1 text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300">
+                            نسمع الآن:
+                          </p>
+                          <p className="font-quran text-base leading-8 text-foreground" dir="rtl">
+                            {liveText}
+                          </p>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <>
@@ -182,10 +272,10 @@ export function TasmeeVoice({ page, payload, onAddMistakes, onLog, savingHard }:
                       </button>
                       <div className="text-center">
                         <p className="text-base font-extrabold">
-                          {sending ? "نستمع إلى تلاوتك ونصحّحها…" : "ابدأ التلاوة"}
+                          {sending ? "نصحّح تلاوتك كلمة كلمة…" : "ابدأ التلاوة"}
                         </p>
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                          {sending ? "قد يستغرق هذا لحظات — لا تغلق الصفحة" : `سمّع صفحة ${arNum(page)} من حفظك بلا نظر`}
+                          {sending ? "لحظة واحدة — يتم التصحيح داخل جهازك" : `سمّع صفحة ${arNum(page)} من حفظك بلا نظر`}
                         </p>
                       </div>
                     </>

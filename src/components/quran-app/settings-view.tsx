@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState, type ChangeEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -14,6 +14,8 @@ import type { AppState } from "@/lib/types"
 import { GAP_OPTIONS, INTENSITY_META, MAX_CAPACITY, type Intensity } from "@/lib/content"
 import { formatDays, formatPages, pagesToRanges } from "@/lib/format"
 import { juzPageRange } from "@/lib/quran"
+import { backendMode } from "@/lib/client-backend/entry"
+import { exportOfflineDb, importOfflineDb } from "@/lib/db-offline"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -48,6 +50,11 @@ import {
   Clock3,
   ShieldCheck,
   Wand2,
+  DatabaseBackup,
+  HardDriveDownload,
+  Upload,
+  Copy,
+  Check,
 } from "lucide-react"
 
 const TIMEZONES = [
@@ -87,6 +94,75 @@ export function SettingsView({
   const [editOpen, setEditOpen] = useState(false)
   const [editSet, setEditSet] = useState<Set<number>>(new Set())
   const [savingRanges, setSavingRanges] = useState(false)
+
+  // النسخ الاحتياطي (نسخة الجوال — البيانات محلية بالكامل)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const [exportText, setExportText] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const exportBackup = async () => {
+    const json = exportOfflineDb()
+    const filename = `wirdi-backup-${new Date().toISOString().slice(0, 10)}.json`
+    // ١) شارك كملف إن أمكن (الأنسب في تطبيق الجوال)
+    try {
+      const file = new File([json], filename, { type: "application/json" })
+      const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean }
+      if (nav.share && nav.canShare?.({ files: [file] })) {
+        await nav.share({ files: [file], title: "نسخة وِردي الاحتياطية" })
+        return
+      }
+    } catch {
+      /* أُلغيت المشاركة أو لا دعم — نجرب التنزيل */
+    }
+    // ٢) تنزيل ملف
+    try {
+      const blob = new Blob([json], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 4000)
+      toast({ title: "تم تنزيل النسخة الاحتياطية", description: filename })
+    } catch {
+      // ٣) عرض يدوي للنسخ
+      setExportText(json)
+    }
+  }
+
+  const copyExport = async () => {
+    if (!exportText) return
+    try {
+      await navigator.clipboard.writeText(exportText)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* تجاهل */
+    }
+  }
+
+  const importBackup = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    try {
+      const text = await file.text()
+      const parsed = JSON.parse(text) as { profile?: unknown[] }
+      if (!parsed || !Array.isArray(parsed.profile) || !importOfflineDb(text)) {
+        throw new Error("bad")
+      }
+      toast({ title: "تم استيراد نسختك الاحتياطية", description: "أعد فتح التطبيق لرؤية بياناتك كاملة" })
+      setTimeout(() => window.location.reload(), 1400)
+    } catch {
+      toast({
+        title: "ملف غير صالح",
+        description: "تأكد من اختيار ملف نسخة احتياطية صدر من وِردي نفسه",
+        variant: "destructive",
+      })
+    }
+  }
 
   const memorizedSet = useMemo(() => {
     const s = new Set<number>()
@@ -438,6 +514,41 @@ export function SettingsView({
         </CardContent>
       </Card>
 
+      {/* النسخ الاحتياطي — نسخة الجوال: البيانات كلها داخل الجهاز */}
+      {backendMode === "offline" && (
+        <Card className="border-border/60 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <DatabaseBackup className="h-5 w-5 text-primary" />
+              النسخ الاحتياطي
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs leading-6 text-muted-foreground">
+              خطتك وإنجازك محفوظة داخل جهازك مباشرة — وكل تحديث للتطبيق يُثبَّت فوق القديم دون فقدان شيء. احتفظ بنسخة
+              احتياطية كنسخة تأمين إضافية، أو لنقل بياناتك إلى جهاز آخر.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" className="gap-2" onClick={() => void exportBackup()}>
+                <HardDriveDownload className="h-4 w-4" />
+                تصدير نسخة احتياطية
+              </Button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => void importBackup(e)}
+              />
+              <Button type="button" variant="outline" className="gap-2" onClick={() => fileRef.current?.click()}>
+                <Upload className="h-4 w-4" />
+                استيراد نسخة
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* زر الحفظ */}
       {dirty && (
         <div className="sticky bottom-4 z-10 flex justify-center">
@@ -479,6 +590,32 @@ export function SettingsView({
           </AlertDialog>
         </CardContent>
       </Card>
+
+      {/* حوار النسخ اليدوي — إن تعذّرت المشاركة والتنزيل */}
+      <Dialog open={!!exportText} onOpenChange={(o) => !o && setExportText(null)}>
+        <DialogContent className="sm:max-w-xl" dir="rtl">
+          <DialogHeader>
+            <DialogTitle>نسختك الاحتياطية — انسخها واحفظها</DialogTitle>
+            <DialogDescription>انسخ النص كاملاً واحفظه في أي مكان آمن. للاستعادة: الصقه في ملف نصي بامتداد .json ثم استورده.</DialogDescription>
+          </DialogHeader>
+          <textarea
+            readOnly
+            value={exportText ?? ""}
+            dir="ltr"
+            className="scroll-thin h-48 w-full rounded-lg border border-border/70 bg-muted/40 p-2 text-[10px] leading-4"
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <DialogFooter className="flex-row-reverse sm:justify-start">
+            <Button type="button" onClick={() => void copyExport()} className="gap-2">
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? "تم النسخ" : "نسخ النص"}
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setExportText(null)}>
+              إغلاق
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* حوار تعديل الصفحات */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
