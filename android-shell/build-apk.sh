@@ -47,9 +47,41 @@ RUN_CODE="${GITHUB_RUN_NUMBER:-$(date +%y%m%d)}"
 sed -i "s/versionCode 1/versionCode ${RUN_CODE}/" android/app/build.gradle
 sed -i "s/versionName \"1.0\"/versionName \"${VERSION}\"/" android/app/build.gradle
 echo "    الإصدار ${VERSION} (versionCode ${RUN_CODE})"
-# توقيع ثابت بديل مفتاح التصحيح العشوائي — حفاظاً على بيانات المستخدم عند التحديث
+
+# توقيع ثابت صريح في مشروع أندرويد — يتجاوز منطق AGP لموقع مفتاح التصحيح
+# الافتراضي، فيُوقَّع كل إصدار بالمفتاح نفسه وتُثبَّت التحديثات فوق القديم
+# بلا حذف (تبقى خطة الحفظ والتقدم على الجهاز)
+cp wirdi.keystore android/app/wirdi.keystore
+cat >> android/app/build.gradle <<'GRADLE_PATCH'
+
+// وِردي: توقيع ثابت بمفتاح المستودع — التحديثات تُثبَّت فوق القديم بلا فقدان البيانات
+android {
+    signingConfigs {
+        wirdiStable {
+            storeFile file("wirdi.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.wirdiStable
+        }
+    }
+}
+GRADLE_PATCH
+# احتياط إضافي: نزرع المفتاح أيضاً في المواقع الافتراضية المحتملة لمفتاح التصحيح
 mkdir -p "$HOME/.android"
 cp wirdi.keystore "$HOME/.android/debug.keystore"
+if [ -n "${ANDROID_SDK_HOME:-}" ]; then
+  mkdir -p "$ANDROID_SDK_HOME/.android"
+  cp wirdi.keystore "$ANDROID_SDK_HOME/.android/debug.keystore"
+fi
+if [ -n "${ANDROID_USER_HOME:-}" ]; then
+  mkdir -p "$ANDROID_USER_HOME"
+  cp wirdi.keystore "$ANDROID_USER_HOME/debug.keystore"
+fi
 
 echo "==> 5/6 الأيقونات والمزامنة"
 node scripts/make-icons.mjs
