@@ -55,6 +55,8 @@ cp wirdi.keystore android/app/wirdi.keystore
 cat >> android/app/build.gradle <<'GRADLE_PATCH'
 
 // وِردي: توقيع ثابت بمفتاح المستودع — التحديثات تُثبَّت فوق القديم بلا فقدان البيانات
+// نوقّع نسخة الإصدار (Release) نفسها بالمفتاح الثابت: أسرع في التشغيل، وبعض
+// الهواتف (شاومي/هواوي وأمثالها) ترفض تثبيت نسخ التطوير (debug) أصلاً
 android {
     signingConfigs {
         wirdiStable {
@@ -68,6 +70,15 @@ android {
         debug {
             signingConfig signingConfigs.wirdiStable
         }
+        release {
+            signingConfig signingConfigs.wirdiStable
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
     }
 }
 GRADLE_PATCH
@@ -87,12 +98,12 @@ echo "==> 5/6 الأيقونات والمزامنة"
 node scripts/make-icons.mjs
 npx cap sync android
 
-echo "==> 6/6 بناء APK (موقّع بمفتاح ثابت وجاهز للتثبيت فوق النسخ السابقة)"
+echo "==> 6/6 بناء APK إصدار رسمي (Release موقّع بالمفتاح الثابت — يُثبَّت فوق النسخ السابقة)"
 cd android
 chmod +x gradlew
-./gradlew assembleDebug --no-daemon -q
+./gradlew assembleRelease --no-daemon -q
 cd ..
 
 mkdir -p dist
-cp android/app/build/outputs/apk/debug/app-debug.apk dist/wirdi-offline.apk
+cp android/app/build/outputs/apk/release/app-release.apk dist/wirdi-offline.apk
 echo "==> تم: dist/wirdi-offline.apk ($(du -h dist/wirdi-offline.apk | cut -f1))"
